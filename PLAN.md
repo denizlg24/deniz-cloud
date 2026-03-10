@@ -42,43 +42,43 @@ All HTTP services are exposed through **Cloudflare Tunnels**. Database services 
 ## 3. Architecture
 
 ```
-                        ┌──────────────────────────────────────┐
-                        │          Cloudflare                  │
-                        │                                      │
-                        │  storage.denizlg24.com ──► Tunnel ──►│──► :3001 (Storage UI + API)
-                        │  cloud.denizlg24.com   ──► Tunnel ──►│──► :3002 (Admin Panel)
-                        │                                      │
-                        │  mongodb.denizlg24.com ──► DNS A ───►│──► :27018 (MongoDB)
-                        │  postgres.denizlg24.com──► DNS A ───►│──► :5433  (PostgreSQL)
-                        └──────────────────────────────────────┘
+                        ┌────────────────────────────────────────────────────────────────────┐
+                        │          Cloudflare                                                │
+                        │                                                                    │
+                        │  storage.denizlg24.com ──► Tunnel ──► ──► :3001 (Storage UI + API) │
+                        │  cloud.denizlg24.com   ──► Tunnel ──► ──► :3002 (Admin Panel)      │
+                        │                                                                    │ 
+                        │  mongodb.denizlg24.com ──► DNS A ───► ──► :27018 (MongoDB)         │
+                        │  postgres.denizlg24.com──► DNS A ───► ──► :5433  (PostgreSQL)      │
+                        └────────────────────────────────────────────────────────────────────┘
                                         │
                                         ▼
                         ┌──────────────────────────────────────┐
-                        │         Raspberry Pi 5               │
+                        │           Raspberry Pi 5             │
                         │                                      │
                         │  ┌─────────────────────────────────┐ │
-                        │  │        Docker Compose            │ │
-                        │  │                                  │ │
+                        │  │        Docker Compose           │ │
+                        │  │                                 │ │
                         │  │  ┌─────────┐  ┌──────────────┐  │ │
-                        │  │  │MongoDB  │  │ PostgreSQL   │  │ │
-                        │  │  │ :27018  │  │  :5433       │  │ │
+                        │  │  │ MongoDB │  │  PostgreSQL  │  │ │
+                        │  │  │ :27018  │  │   :5433      │  │ │
                         │  │  └─────────┘  └──────────────┘  │ │
-                        │  │                                  │ │
+                        │  │                                 │ │
                         │  │  ┌──────────────────────────┐   │ │
                         │  │  │  Storage Service (Bun)   │   │ │
                         │  │  │  API + Web UI  :3001     │   │ │
                         │  │  └──────────────────────────┘   │ │
-                        │  │                                  │ │
+                        │  │                                 │ │
                         │  │  ┌──────────────────────────┐   │ │
                         │  │  │  Admin Panel (Bun)       │   │ │
                         │  │  │  Web UI + API  :3002     │   │ │
                         │  │  └──────────────────────────┘   │ │
-                        │  │                                  │ │
+                        │  │                                 │ │
                         │  │  ┌───────────┐  ┌────────────┐  │ │
                         │  │  │ Adminer   │  │ Mongo UI   │  │ │
                         │  │  │ :8080     │  │ :8081      │  │ │
                         │  │  └───────────┘  └────────────┘  │ │
-                        │  │                                  │ │
+                        │  │                                 │ │
                         │  │  ┌──────────────────────────┐   │ │
                         │  │  │  Cloudflared             │   │ │
                         │  │  │  (Tunnel daemon)         │   │ │
@@ -94,8 +94,8 @@ All HTTP services are exposed through **Cloudflare Tunnels**. Database services 
                         │  └─────────────────────────────────┘ │
                         │                                      │
                         │  ┌────────────┐  ┌────────────────┐  │
-                        │  │  /mnt/ssd  │  │   /mnt/hdd    │  │
-                        │  │  (NVMe)    │  │   (USB 3.0)   │  │
+                        │  │  /mnt/ssd  │  │   /mnt/hdd     │  │
+                        │  │  (NVMe)    │  │   (USB 3.0)    │  │
                         │  └────────────┘  └────────────────┘  │
                         └──────────────────────────────────────┘
 ```
