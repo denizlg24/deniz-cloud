@@ -394,7 +394,8 @@ deniz-cloud/
 │       └── vite.config.ts
 │
 ├── scripts/
-│   ├── ddns-update.sh           # DDNS updater script
+│   ├── infra/
+│   │   ├── ddns-update.sh/      # DDNS updater script
 │   ├── backup.sh                # Database backup script
 │   └── tiering.sh               # Tiering daemon (or built into storage-api)
 │
@@ -472,8 +473,8 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 - [ ] Configure Postgres and MongoDB (auth, TLS, memory limits)
 - [ ] Set up shared package (types, DB schema with Drizzle)
 - [ ] Implement auth system (registration, login, TOTP, recovery codes, API keys)
-- [ ] Set up DDNS updater script + cron
-- [ ] Configure router port forwarding
+- [x] Set up DDNS updater script + cron
+- [x] Configure router port forwarding
 
 ### Phase 2: Storage Service
 
