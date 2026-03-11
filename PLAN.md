@@ -29,6 +29,7 @@ All HTTP services are exposed through **Cloudflare Tunnels**. Database services 
 /mnt/ssd/
 ├── postgres/        # PostgreSQL data directory
 ├── mongo/           # MongoDB data directory
+├── meilisearch/     # Meilisearch data directory
 ├── storage/hot/     # Frequently accessed files
 └── backups/         # DB snapshot staging
 
@@ -78,6 +79,11 @@ All HTTP services are exposed through **Cloudflare Tunnels**. Database services 
                         │  │  │ Adminer   │  │ Mongo UI   │  │ │
                         │  │  │ :8080     │  │ :8081      │  │ │
                         │  │  └───────────┘  └────────────┘  │ │
+                        │  │                                 │ │
+                        │  │  ┌──────────────────────────┐   │ │
+                        │  │  │  Meilisearch             │   │ │
+                        │  │  │  (Search sidecar) :7700  │   │ │
+                        │  │  └──────────────────────────┘   │ │
                         │  │                                 │ │
                         │  │  ┌──────────────────────────┐   │ │
                         │  │  │  Cloudflared             │   │ │
@@ -261,7 +267,29 @@ Superuser-only interface. Accessible only after admin authentication (TOTP + rec
 
 ---
 
-### 4.7 Database Backup (Cron Job)
+### 4.7 Meilisearch (Search Sidecar)
+
+MongoDB Atlas Search (`$search` aggregation stage) is not available on self-hosted MongoDB — it's an Atlas-exclusive feature powered by Lucene. To support apps that were built against Atlas Search, we run **Meilisearch** as a lightweight search sidecar.
+
+- Meilisearch container (~80–120MB RAM), ARM64 compatible
+- Data directory mounted on SSD (`/mnt/ssd/meilisearch`)
+- Internal-only (not exposed outside Docker network)
+- Apps sync their MongoDB collections to Meilisearch indexes and query Meilisearch directly for search, then use the returned document IDs to fetch full documents from MongoDB
+- Syncing is done via **MongoDB change streams** — a shared utility watches collections and keeps Meilisearch indexes up to date in near-real-time
+
+#### Why Meilisearch over alternatives
+
+| Option | RAM | Notes |
+|---|---|---|
+| **Meilisearch** | ~80–120MB | Lightweight, fast, typo-tolerant, great relevance, ARM64 Docker image |
+| Typesense | ~100–150MB | Similar to Meilisearch, slightly heavier |
+| OpenSearch/Elasticsearch | 500MB+ | Way too heavy for a 4GB Pi |
+
+See [`SEARCH_MIGRATION.md`](./SEARCH_MIGRATION.md) for a guide on migrating `$search` queries to Meilisearch.
+
+---
+
+### 4.8 Database Backup (Cron Job)
 
 - Runs daily (configurable)
 - `pg_dump` for PostgreSQL → compressed archive → `/mnt/ssd/backups/` → older backups rotated to `/mnt/hdd/backups/`
@@ -318,6 +346,7 @@ Superuser-only interface. Accessible only after admin authentication (TOTP + rec
 | ORM | Drizzle (lightweight, TypeScript-native) |
 | File previews | Sharp (images), pdf.js (PDFs), native video element (streaming) |
 | Auth | Custom (argon2, otpauth for TOTP) |
+| Search (Atlas Search replacement) | Meilisearch (sidecar, synced via change streams) |
 | Containerization | Docker + Docker Compose |
 | Tunnel | Cloudflared |
 | DB admin tools | Adminer (Postgres), mongo-express with `--minimal` or Mongoku (Mongo) |
@@ -357,6 +386,7 @@ deniz-cloud/
 │   │   ├── src/
 │   │   │   ├── auth/            # Auth helpers (argon2, TOTP, JWT)
 │   │   │   ├── db/              # Drizzle schema, connection helpers
+│   │   │   ├── search/          # Meilisearch client, change stream sync utility
 │   │   │   ├── storage/         # Tiering logic, file helpers
 │   │   │   └── types/           # Shared TypeScript types
 │   │   └── package.json
@@ -401,6 +431,7 @@ deniz-cloud/
 │
 ├── config/
 │   ├── cloudflared/             # Tunnel config
+│   ├── meilisearch/             # Meilisearch config (optional)
 │   ├── mongo/                   # MongoDB config (mongod.conf)
 │   ├── postgres/                # PostgreSQL config (postgresql.conf)
 │   └── nginx/                   # Optional: reverse proxy config
@@ -422,10 +453,11 @@ deniz-cloud/
 | `admin` | Custom (Bun + Hono) | 3002 | 250MB |
 | `adminer` | adminer:latest | 8080 (internal only) | 100MB |
 | `mongo-ui` | mongoku or similar | 8081 (internal only) | 80MB |
+| `meilisearch` | getmeili/meilisearch:latest | 7700 (internal only) | 120MB |
 | `cloudflared` | cloudflare/cloudflared | — | 64MB |
 
-**Total Docker memory limits: ~1.4GB**
-Remaining ~2.6GB for OS, disk cache, host services, and headroom.
+**Total Docker memory limits: ~1.5GB**
+Remaining ~2.5GB for OS, disk cache, host services, and headroom.
 
 Adminer and mongo-ui are only accessible through the admin panel (internal Docker network, not exposed to host ports or Cloudflare).
 
@@ -471,7 +503,8 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 - [ ] Initialize monorepo with Bun workspaces
 - [ ] Set up Docker Compose with Postgres, MongoDB, Cloudflared
 - [ ] Configure Postgres and MongoDB (auth, TLS, memory limits)
-- [ ] Set up shared package (types, DB schema with Drizzle)
+- [ ] Set up shared package (types, DB schema with Drizzle, Meilisearch sync utility)
+- [ ] Configure Meilisearch container (internal-only, SSD data dir)
 - [ ] Implement auth system (registration, login, TOTP, recovery codes, API keys)
 - [x] Set up DDNS updater script + cron
 - [x] Configure router port forwarding
@@ -523,3 +556,4 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 | File storage path scheme | `/{userId}/{folderId}/{fileId}` vs flat with DB mapping | Flat + DB mapping is simpler for tiering |
 | Video streaming | Direct file serve vs HLS chunked | Direct is simpler, HLS better for large files |
 | SPA routing | Hash router vs history API (needs server catch-all) | Hono catch-all is trivial, history API is cleaner |
+| ~~Atlas Search replacement~~ | ~~Meilisearch sidecar vs keep Atlas vs build proxy~~ | **Decided: Meilisearch sidecar.** Apps query Meilisearch for search, MongoDB for data. See `SEARCH_MIGRATION.md` |
