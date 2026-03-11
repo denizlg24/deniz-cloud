@@ -48,6 +48,7 @@ All HTTP services are exposed through **Cloudflare Tunnels**. Database services 
                         │                                                                    │
                         │  storage.denizlg24.com ──► Tunnel ──► ──► :3001 (Storage UI + API) │
                         │  cloud.denizlg24.com   ──► Tunnel ──► ──► :3002 (Admin Panel)      │
+                        │  search.denizlg24.com  ──► Tunnel ──► ──► :7700 (Meilisearch)      │
                         │                                                                    │ 
                         │  mongodb.denizlg24.com ──► DNS A ───► ──► :27018 (MongoDB)         │
                         │  postgres.denizlg24.com──► DNS A ───► ──► :5433  (PostgreSQL)      │
@@ -251,6 +252,7 @@ Superuser-only interface. Accessible only after admin authentication (TOTP + rec
 - Routes:
   - `storage.denizlg24.com` → `http://storage-service:3001`
   - `cloud.denizlg24.com` → `http://admin-panel:3002`
+  - `search.denizlg24.com` → `http://meilisearch:7700`
 - Managed via Cloudflare Zero Trust dashboard or config file
 
 ---
@@ -273,7 +275,8 @@ MongoDB Atlas Search (`$search` aggregation stage) is not available on self-host
 
 - Meilisearch container (~80–120MB RAM), ARM64 compatible
 - Data directory mounted on SSD (`/mnt/ssd/meilisearch`)
-- Internal-only (not exposed outside Docker network)
+- Exposed via Cloudflare Tunnel at `search.denizlg24.com` — external apps access it directly using Meilisearch API keys
+- Auth handled by Meilisearch's built-in API key system (master key for admin, scoped search keys for clients)
 - Apps sync their MongoDB collections to Meilisearch indexes and query Meilisearch directly for search, then use the returned document IDs to fetch full documents from MongoDB
 - Syncing is done via **MongoDB change streams** — a shared utility watches collections and keeps Meilisearch indexes up to date in near-real-time
 
@@ -453,7 +456,7 @@ deniz-cloud/
 | `admin` | Custom (Bun + Hono) | 3002 | 250MB |
 | `adminer` | adminer:latest | 8080 (internal only) | 100MB |
 | `mongo-ui` | mongoku or similar | 8081 (internal only) | 80MB |
-| `meilisearch` | getmeili/meilisearch:latest | 7700 (internal only) | 120MB |
+| `meilisearch` | getmeili/meilisearch:latest | 7700 (via CF Tunnel) | 120MB |
 | `cloudflared` | cloudflare/cloudflared | — | 64MB |
 
 **Total Docker memory limits: ~1.5GB**
@@ -471,6 +474,7 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 |---|---|---|
 | `storage.denizlg24.com` | `http://localhost:3001` | HTTP (proxied by CF) |
 | `cloud.denizlg24.com` | `http://localhost:3002` | HTTP (proxied by CF) |
+| `search.denizlg24.com` | `http://localhost:7700` | HTTP (proxied by CF) |
 
 ### Port Forwarding + DDNS (Database services)
 
@@ -504,7 +508,7 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 - [ ] Set up Docker Compose with Postgres, MongoDB, Cloudflared
 - [ ] Configure Postgres and MongoDB (auth, TLS, memory limits)
 - [ ] Set up shared package (types, DB schema with Drizzle, Meilisearch sync utility)
-- [ ] Configure Meilisearch container (internal-only, SSD data dir)
+- [ ] Configure Meilisearch container (CF Tunnel via search.denizlg24.com, SSD data dir)
 - [ ] Implement auth system (registration, login, TOTP, recovery codes, API keys)
 - [x] Set up DDNS updater script + cron
 - [x] Configure router port forwarding
