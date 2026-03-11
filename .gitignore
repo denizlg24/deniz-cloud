@@ -1,3 +1,20 @@
 .env
+.env.local
+.env.*.local
 certs/
+data/
 node_modules/
+dist/
+*.tsbuildinfo
+logs/*
+
+# Envoy - Local state
+.envoy/cache/
+.envoy/latest
+.envoy/HEAD
+.envoy/refs/
+
+# Envoy - Config
+!.envoy/config.json
+
+

@@ -1,0 +1,11 @@
+
+version = 1
+project_id = "5e01f428-f3bd-416b-abe4-7d7781d65f3e"
+name = "deniz-cloud"
+
+default_remote = "origin"
+
+[remotes]
+origin = "https://envoy-cli.vercel.app/api"
+
+

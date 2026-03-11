@@ -22,7 +22,7 @@ set +a
 : "${CF_API_TOKEN:?CF_API_TOKEN not set in .env}"
 : "${CF_ZONE_ID:?CF_ZONE_ID not set in .env}"
 
-SUBDOMAINS=("mongodb.denizlg24.com" "postgres.denizlg24.com")
+SUBDOMAINS=("mongodb.denizlg24.com" "postgres.denizlg24.com" "me.denizlg24.com")
 
 CF_API="https://api.cloudflare.com/client/v4"
 

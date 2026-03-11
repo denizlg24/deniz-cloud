@@ -86,14 +86,11 @@ All HTTP services are exposed through **Cloudflare Tunnels**. Database services 
                         │  │  │  (Search sidecar) :7700  │   │ │
                         │  │  └──────────────────────────┘   │ │
                         │  │                                 │ │
-                        │  │  ┌──────────────────────────┐   │ │
-                        │  │  │  Cloudflared             │   │ │
-                        │  │  │  (Tunnel daemon)         │   │ │
-                        │  │  └──────────────────────────┘   │ │
                         │  └─────────────────────────────────┘ │
                         │                                      │
                         │  ┌─────────────────────────────────┐ │
                         │  │  Host Services                  │ │
+                        │  │  - Cloudflared (tunnel daemon)  │ │
                         │  │  - DDNS updater (cron)          │ │
                         │  │  - Health monitor (Go)          │ │
                         │  │  - Tiering daemon (cron/service)│ │
@@ -248,12 +245,12 @@ Superuser-only interface. Accessible only after admin authentication (TOTP + rec
 
 ### 4.5 Cloudflared (Tunnel Daemon)
 
-- Runs as a Docker container
-- Routes:
+- Runs as a host service (not in Docker)
+- Routes managed via Cloudflare Zero Trust dashboard:
   - `storage.denizlg24.com` → `http://storage-service:3001`
   - `cloud.denizlg24.com` → `http://admin-panel:3002`
   - `search.denizlg24.com` → `http://meilisearch:7700`
-- Managed via Cloudflare Zero Trust dashboard or config file
+- Installed on the Pi host, managed via Cloudflare Zero Trust dashboard
 
 ---
 
@@ -457,10 +454,9 @@ deniz-cloud/
 | `adminer` | adminer:latest | 8080 (internal only) | 100MB |
 | `mongo-ui` | mongoku or similar | 8081 (internal only) | 80MB |
 | `meilisearch` | getmeili/meilisearch:latest | 7700 (via CF Tunnel) | 120MB |
-| `cloudflared` | cloudflare/cloudflared | — | 64MB |
 
-**Total Docker memory limits: ~1.5GB**
-Remaining ~2.5GB for OS, disk cache, host services, and headroom.
+**Total Docker memory limits: ~1.45GB**
+Remaining ~2.55GB for OS, disk cache, host services (incl. cloudflared), and headroom.
 
 Adminer and mongo-ui are only accessible through the admin panel (internal Docker network, not exposed to host ports or Cloudflare).
 
@@ -504,14 +500,16 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 
 ### Phase 1: Foundation
 
-- [ ] Initialize monorepo with Bun workspaces
-- [ ] Set up Docker Compose with Postgres, MongoDB, Cloudflared
-- [ ] Configure Postgres and MongoDB (auth, TLS, memory limits)
-- [ ] Set up shared package (types, DB schema with Drizzle, Meilisearch sync utility)
-- [ ] Configure Meilisearch container (CF Tunnel via search.denizlg24.com, SSD data dir)
-- [ ] Implement auth system (registration, login, TOTP, recovery codes, API keys)
 - [x] Set up DDNS updater script + cron
 - [x] Configure router port forwarding
+- [x] Pi setup (Docker, UFW firewall rules)
+- [x] Cloudflared installed on host (routes managed via CF dashboard)
+- [x] Initialize monorepo with Bun workspaces (all 5 packages scaffolded)
+- [x] Set up Docker Compose with Postgres, MongoDB, Meilisearch, Adminer, mongo-express
+- [x] Configure Postgres and MongoDB (auth, memory limits via command args)
+- [ ] Configure Meilisearch container (CF Tunnel via search.denizlg24.com, SSD data dir)
+- [ ] Set up shared package (types, DB schema with Drizzle, Meilisearch sync utility)
+- [ ] Implement auth system (registration, login, TOTP, recovery codes, API keys)
 
 ### Phase 2: Storage Service
 
@@ -534,7 +532,7 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 
 - [ ] Set up database backup cron (pg_dump, mongodump, rotation)
 - [ ] Configure fail2ban for SSH + DB ports
-- [ ] UFW firewall rules
+- [x] UFW firewall rules (done in Phase 1 — SSH, Postgres, MongoDB)
 - [ ] TLS certificates for databases
 - [ ] Load testing on Pi to verify memory budget
 - [ ] Set up Docker restart policies (always restart)
@@ -556,7 +554,7 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 |---|---|---|
 | Tiering thresholds | File size cutoff, idle time before cold migration, SSD watermark % | Start with 500MB / 30 days / 80%, tune based on usage |
 | Session storage | PostgreSQL vs in-memory | In-memory is faster but lost on restart; PG is durable |
-| Mongo UI tool | Mongoku vs mongo-express --minimal vs custom | Evaluate RAM usage of each |
+| ~~Mongo UI tool~~ | ~~Mongoku vs mongo-express --minimal vs custom~~ | **Decided: mongo-express.** Running in Docker, 80MB limit |
 | File storage path scheme | `/{userId}/{folderId}/{fileId}` vs flat with DB mapping | Flat + DB mapping is simpler for tiering |
 | Video streaming | Direct file serve vs HLS chunked | Direct is simpler, HLS better for large files |
 | SPA routing | Hash router vs history API (needs server catch-all) | Hono catch-all is trivial, history API is cleaner |

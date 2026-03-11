@@ -19,7 +19,7 @@ Self-hosted home server on Raspberry Pi 5 (4GB RAM). Cloud storage + exposed dat
 | Meilisearch | 7700 | search.denizlg24.com | CF Tunnel (Atlas Search replacement, own API key auth) |
 | Adminer | 8080 | internal only | via admin panel |
 | Mongo UI | 8081 | internal only | via admin panel |
-| Cloudflared | - | - | tunnel daemon |
+| Cloudflared | - | - | host service (not Docker) |
 
 ## Tech Stack
 
@@ -65,20 +65,22 @@ Each API serves its paired UI as static files = only 2 server processes total.
 
 ## Docker Memory Budget
 
-Total ~1.5GB for containers, ~2.5GB for OS/cache/host services:
+Total ~1.45GB for containers, ~2.55GB for OS/cache/host services (cloudflared runs on host):
 - Postgres: 200MB | MongoDB: 400MB | Storage: 300MB | Admin: 250MB
-- Meilisearch: 120MB | Adminer: 100MB | Mongo UI: 80MB | Cloudflared: 64MB
+- Meilisearch: 120MB | Adminer: 100MB | Mongo UI: 80MB
 
 ## Current Progress
 
 ### Done
 - [x] DDNS updater script + cron (`scripts/infra/ddns-update.sh`)
-- [x] Router port forwarding configured
+- [x] Router port forwarding
+- [x] Pi setup — Docker + UFW (22, 5433, 27018)
+- [x] Cloudflared on host (routes via CF dashboard)
+- [x] Monorepo initialized — Bun workspaces, all 5 packages scaffolded, typechecks pass
+- [x] Docker Compose — Postgres, MongoDB, Meilisearch, Adminer, mongo-express all running
+- [x] Postgres + MongoDB config (auth, memory limits via command args)
 
-### Next: Phase 1 (Foundation)
-- [ ] Initialize monorepo with Bun workspaces
-- [ ] Docker Compose (Postgres, MongoDB, Meilisearch, Cloudflared)
-- [ ] Postgres + MongoDB config (auth, TLS, memory limits)
+### Next: Phase 1 (Foundation) — remaining
 - [ ] Meilisearch container (CF Tunnel via search.denizlg24.com, SSD data dir)
 - [ ] Shared package (types, Drizzle schema, Meilisearch sync utility)
 - [ ] Auth system (registration, login, TOTP, recovery codes, API keys)
@@ -86,7 +88,7 @@ Total ~1.5GB for containers, ~2.5GB for OS/cache/host services:
 ### Future Phases
 - Phase 2: Storage service (API, tiering engine, UI, previews, sharing)
 - Phase 3: Admin panel (stats, user mgmt, DB tools)
-- Phase 4: Backups, fail2ban, UFW, TLS certs, load testing
+- Phase 4: Backups, fail2ban, TLS certs, load testing
 - Phase 5: S3 API, search, bulk download, mobile UI
 
 ## Conventions
