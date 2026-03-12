@@ -556,9 +556,10 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 - [x] Set up Docker Compose with Postgres, MongoDB, Meilisearch, Adminer, mongo-express
 - [x] Configure Postgres and MongoDB (auth, memory limits via command args)
 - [x] Configure Meilisearch container (CF Tunnel via search.denizlg24.com, SSD data dir)
-- [ ] Set up shared package (types, DB schema with Drizzle, Meilisearch sync utility)
-- [ ] Search scoping API in admin-api (project/collection CRUD, tenant token issuance)
-- [ ] Implement auth system (registration, login, TOTP, recovery codes, API keys)
+- [x] Set up shared package — Drizzle schema (users, sessions, totp_secrets, recovery_codes, api_keys, search_projects), auth primitives (argon2id via Bun.password, TOTP via otpauth, JWT via jose, AES-256-GCM encryption, recovery codes), auth service layer, Hono middleware (Bearer + API key auth, role guard), Meilisearch utils (client, index CRUD, tenant tokens via meilisearch/token), API types, env helpers. Subpath exports: `./db`, `./auth`, `./services`, `./middleware`, `./search`, `./types`, `./env`
+- [x] Search scoping API in admin-api — 7 endpoints: project CRUD (list/create/detail/delete), collection CRUD (create/delete), tenant token generation. All superuser-only. Input validation (lowercase alphanumeric + hyphens). Sensitive fields (meiliApiKey, meiliApiKeyUid) stripped from responses
+- [x] Implement auth system — registration, login (password + TOTP with recovery code fallback), DB-backed sessions (JWT signed + token hash in PG for revocation), API key auth (SHA-256 hash, prefix lookup), Hono middleware. Superuser seed CLI (`bun run seed:admin`): interactive setup with TOTP QR + recovery codes. Auth routes in admin-api: POST /login, GET /me, POST /logout
+- [x] Unit tests (40 passing, bun test) — password hashing, TOTP generate/verify/encrypt/decrypt, JWT sign/verify/expiry/tampering, recovery code generation/hashing/verification, search index naming, env validation
 
 ### Phase 2: Storage Service
 
@@ -602,7 +603,7 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 | Decision | Options | Notes |
 |---|---|---|
 | Tiering thresholds | File size cutoff, idle time before cold migration, SSD watermark % | Start with 500MB / 30 days / 80%, tune based on usage |
-| Session storage | PostgreSQL vs in-memory | In-memory is faster but lost on restart; PG is durable |
+| ~~Session storage~~ | ~~PostgreSQL vs in-memory~~ | **Decided: PostgreSQL.** JWT signed tokens + token hash stored in PG sessions table for revocation. DB lookup on every request (by session ID + hash + expiry) |
 | ~~Mongo UI tool~~ | ~~Mongoku vs mongo-express --minimal vs custom~~ | **Decided: mongo-express.** Running in Docker, 80MB limit |
 | File storage path scheme | `/{userId}/{folderId}/{fileId}` vs flat with DB mapping | Flat + DB mapping is simpler for tiering |
 | Video streaming | Direct file serve vs HLS chunked | Direct is simpler, HLS better for large files |

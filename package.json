@@ -1,13 +1,23 @@
 {
   "name": "deniz-cloud",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev:storage-api": "bun run --filter @deniz-cloud/storage-api dev",
     "dev:admin-api": "bun run --filter @deniz-cloud/admin-api dev",
     "dev:storage-ui": "bun run --filter @deniz-cloud/storage-ui dev",
     "dev:admin-ui": "bun run --filter @deniz-cloud/admin-ui dev",
     "build": "bun run --filter '*' build",
-    "typecheck": "bun run --filter '*' typecheck"
+    "test": "bun run --filter '*' test",
+    "lint": "bunx biome check ./packages/",
+    "lint:fix": "bunx biome check --write ./packages/",
+    "typecheck": "bun run --filter '*' typecheck",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.6",
+    "husky": "^9.1.7"
   }
 }
