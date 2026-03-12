@@ -48,7 +48,7 @@ All HTTP services are exposed through **Cloudflare Tunnels**. Database services 
                         │                                                                    │
                         │  storage.denizlg24.com ──► Tunnel ──► ──► :3001 (Storage UI + API) │
                         │  cloud.denizlg24.com   ──► Tunnel ──► ──► :3002 (Admin Panel)      │
-                        │  search.denizlg24.com  ──► Tunnel ──► ──► :7700 (Meilisearch)      │
+                        │  search.denizlg24.com  ──► Tunnel ──► ──► :7700 (Meilisearch, tenant token auth) │
                         │                                                                    │ 
                         │  mongodb.denizlg24.com ──► DNS A ───► ──► :27018 (MongoDB)         │
                         │  postgres.denizlg24.com──► DNS A ───► ──► :5433  (PostgreSQL)      │
@@ -236,6 +236,12 @@ Superuser-only interface. Accessible only after admin authentication (TOTP + rec
   - Reset user MFA
   - View user activity
 
+- **Search Management:**
+  - Project CRUD (create/list/delete search projects)
+  - Collection CRUD per project (maps to Meilisearch indexes)
+  - Tenant token issuance (scoped JWTs for external apps)
+  - View index stats (document count, size)
+
 - **Backup Management:**
   - View backup history and status
   - Trigger manual backup
@@ -272,10 +278,43 @@ MongoDB Atlas Search (`$search` aggregation stage) is not available on self-host
 
 - Meilisearch container (~80–120MB RAM), ARM64 compatible
 - Data directory mounted on SSD (`/mnt/ssd/meilisearch`)
-- Exposed via Cloudflare Tunnel at `search.denizlg24.com` — external apps access it directly using Meilisearch API keys
-- Auth handled by Meilisearch's built-in API key system (master key for admin, scoped search keys for clients)
+- Exposed via Cloudflare Tunnel at `search.denizlg24.com` — external apps query Meilisearch directly using **tenant tokens**
+- Master key held only by admin-api; never shared with external apps
 - Apps sync their MongoDB collections to Meilisearch indexes and query Meilisearch directly for search, then use the returned document IDs to fetch full documents from MongoDB
 - Syncing is done via **MongoDB change streams** — a shared utility watches collections and keeps Meilisearch indexes up to date in near-real-time
+
+#### Multi-Tenant Scoping (Projects & Collections)
+
+Meilisearch has flat indexes with no native concept of projects or collections. We add multi-tenancy via a **hybrid approach**: admin-api manages the control plane, apps query Meilisearch directly on the data plane.
+
+**Index naming convention:** `{projectId}_{collectionName}` (e.g., `myapp_users`, `myapp_products`)
+
+**Control plane (admin-api routes):**
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/search/projects` | Create a project (registers prefix, stores metadata in Postgres) |
+| `GET /api/search/projects` | List projects |
+| `DELETE /api/search/projects/:id` | Delete project + all its indexes |
+| `POST /api/search/projects/:id/collections` | Create a collection (Meilisearch index with `{projectId}_{name}`) |
+| `DELETE /api/search/projects/:id/collections/:name` | Drop a Meilisearch index |
+| `POST /api/search/projects/:id/tokens` | Issue a **Meilisearch tenant token** (scoped JWT) |
+
+**Tenant tokens:**
+- Meilisearch tenant tokens are JWTs signed with a parent search API key
+- They embed index scope rules (e.g., only indexes matching `myapp_*`) and optional filter restrictions
+- Meilisearch validates the token server-side — no proxy needed, cryptographic enforcement
+- Tokens have a configurable expiry; apps call the token endpoint to refresh
+
+**Data plane (direct to Meilisearch):**
+- Apps use the tenant token as a Bearer token when querying `search.denizlg24.com`
+- Meilisearch enforces the scope — apps can only search indexes their token allows
+- Zero proxy overhead on the read path
+
+**Project metadata stored in Postgres (via Drizzle):**
+- Project ID, name, owner, created_at
+- Associated Meilisearch search API key UID (used to sign tenant tokens)
+- Collection list (derived from Meilisearch index listing with prefix match)
 
 #### Why Meilisearch over alternatives
 
@@ -284,6 +323,15 @@ MongoDB Atlas Search (`$search` aggregation stage) is not available on self-host
 | **Meilisearch** | ~80–120MB | Lightweight, fast, typo-tolerant, great relevance, ARM64 Docker image |
 | Typesense | ~100–150MB | Similar to Meilisearch, slightly heavier |
 | OpenSearch/Elasticsearch | 500MB+ | Way too heavy for a 4GB Pi |
+
+#### Why hybrid (admin-api + direct queries) over alternatives
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Hybrid (chosen)** | Zero extra RAM, fast reads (direct), centralized management, cryptographic scoping | Token refresh needed, two endpoints for apps to know |
+| Convention only (shared pkg) | Simplest | No enforcement — any app with master key can bypass |
+| Dedicated search-api proxy | Single entry point, full control | Extra ~100-150MB RAM, latency on every query |
+| All in admin-api (proxied reads) | Single endpoint | Adds load to admin-api, unnecessary proxy overhead |
 
 See [`SEARCH_MIGRATION.md`](./SEARCH_MIGRATION.md) for a guide on migrating `$search` queries to Meilisearch.
 
@@ -410,8 +458,8 @@ deniz-cloud/
 │   │
 │   ├── admin-api/               # Admin panel backend (Hono on Bun)
 │   │   ├── src/
-│   │   │   ├── routes/          # Dashboard, user mgmt, backup, tiering config
-│   │   │   ├── services/        # System stats, backup triggers
+│   │   │   ├── routes/          # Dashboard, user mgmt, backup, tiering config, search scoping
+│   │   │   ├── services/        # System stats, backup triggers, search project management
 │   │   │   └── index.ts
 │   │   ├── Dockerfile
 │   │   └── package.json
@@ -509,6 +557,7 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 - [x] Configure Postgres and MongoDB (auth, memory limits via command args)
 - [ ] Configure Meilisearch container (CF Tunnel via search.denizlg24.com, SSD data dir)
 - [ ] Set up shared package (types, DB schema with Drizzle, Meilisearch sync utility)
+- [ ] Search scoping API in admin-api (project/collection CRUD, tenant token issuance)
 - [ ] Implement auth system (registration, login, TOTP, recovery codes, API keys)
 
 ### Phase 2: Storage Service
@@ -559,3 +608,4 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 | Video streaming | Direct file serve vs HLS chunked | Direct is simpler, HLS better for large files |
 | SPA routing | Hash router vs history API (needs server catch-all) | Hono catch-all is trivial, history API is cleaner |
 | ~~Atlas Search replacement~~ | ~~Meilisearch sidecar vs keep Atlas vs build proxy~~ | **Decided: Meilisearch sidecar.** Apps query Meilisearch for search, MongoDB for data. See `SEARCH_MIGRATION.md` |
+| ~~Meilisearch multi-tenancy~~ | ~~Convention only vs proxy vs hybrid~~ | **Decided: Hybrid.** Admin-api manages projects/collections + issues tenant tokens; apps query Meilisearch directly with scoped JWTs. See section 4.7 |

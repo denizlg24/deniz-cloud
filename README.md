@@ -12,6 +12,7 @@ Self-hosted home server running on a Raspberry Pi 5 (4GB RAM) with tiered storag
 
 - `storage.denizlg24.com` — File storage (Cloudflare Tunnel)
 - `cloud.denizlg24.com` — Admin panel (Cloudflare Tunnel)
+- `search.denizlg24.com` — Mileisearch (Replaces MongoDB Atlas Search)
 - `mongodb.denizlg24.com` — MongoDB (port forward + DDNS)
 - `postgres.denizlg24.com` — PostgreSQL (port forward + DDNS)
 

@@ -16,7 +16,7 @@ Self-hosted home server on Raspberry Pi 5 (4GB RAM). Cloud storage + exposed dat
 | Admin Panel (Bun/Hono) | 3002 | cloud.denizlg24.com | CF Tunnel |
 | PostgreSQL 16 | 5433 | postgres.denizlg24.com | Port forward + DDNS |
 | MongoDB 7 | 27018 | mongodb.denizlg24.com | Port forward + DDNS |
-| Meilisearch | 7700 | search.denizlg24.com | CF Tunnel (Atlas Search replacement, own API key auth) |
+| Meilisearch | 7700 | search.denizlg24.com | CF Tunnel (tenant token auth, queries go direct) |
 | Adminer | 8080 | internal only | via admin panel |
 | Mongo UI | 8081 | internal only | via admin panel |
 | Cloudflared | - | - | host service (not Docker) |
@@ -28,7 +28,7 @@ Self-hosted home server on Raspberry Pi 5 (4GB RAM). Cloud storage + exposed dat
 - **Frontend**: React + Vite (static SPA, no SSR — saves RAM)
 - **ORM**: Drizzle (lightweight, no query engine binary)
 - **Auth**: Custom (argon2, TOTP via otpauth, JWT sessions)
-- **Search**: Meilisearch (sidecar replacing Atlas Search; synced via MongoDB change streams)
+- **Search**: Meilisearch (sidecar replacing Atlas Search; synced via MongoDB change streams; multi-tenant via project/collection scoping + tenant tokens)
 - **Containerization**: Docker Compose
 - **Package manager**: bun (never npm)
 
@@ -62,6 +62,7 @@ Each API serves its paired UI as static files = only 2 server processes total.
 - **Auth**: 2FA (TOTP) for all users; superuser adds recovery code as 3rd factor
 - **Flat file paths + DB mapping**: Simpler for tiering than hierarchical paths
 - **Meilisearch over ES/OpenSearch**: ~80-120MB RAM vs 500MB+; Atlas Search ($search) is Atlas-exclusive, not available on self-hosted MongoDB
+- **Meilisearch multi-tenancy**: Admin-api manages projects/collections (index naming: `{projectId}_{collection}`), issues Meilisearch tenant tokens (scoped JWTs). Apps query Meilisearch directly with tokens — no proxy overhead, cryptographic scope enforcement
 
 ## Docker Memory Budget
 
@@ -83,6 +84,7 @@ Total ~1.45GB for containers, ~2.55GB for OS/cache/host services (cloudflared ru
 ### Next: Phase 1 (Foundation) — remaining
 - [ ] Meilisearch container (CF Tunnel via search.denizlg24.com, SSD data dir)
 - [ ] Shared package (types, Drizzle schema, Meilisearch sync utility)
+- [ ] Search scoping API in admin-api (project/collection CRUD, tenant token issuance)
 - [ ] Auth system (registration, login, TOTP, recovery codes, API keys)
 
 ### Future Phases
