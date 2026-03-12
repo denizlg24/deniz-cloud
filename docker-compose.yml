@@ -45,12 +45,13 @@ services:
   meilisearch:
     image: getmeili/meilisearch:latest
     ports:
-      - "7700:7700"
+      - "${MEILI_PORT:-7700}:7700"
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
-      MEILI_ENV: development
+      MEILI_ENV: ${MEILI_ENV:-development}
+      MEILI_NO_ANALYTICS: "true"
     volumes:
-      - ./data/meilisearch:/meili_data # temporary data directory for development
+      - ${MEILI_DATA_DIR:-./data/meilisearch}:/meili_data
     mem_limit: 120m
     restart: unless-stopped
     healthcheck:

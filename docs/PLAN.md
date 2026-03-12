@@ -555,7 +555,7 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 - [x] Initialize monorepo with Bun workspaces (all 5 packages scaffolded)
 - [x] Set up Docker Compose with Postgres, MongoDB, Meilisearch, Adminer, mongo-express
 - [x] Configure Postgres and MongoDB (auth, memory limits via command args)
-- [ ] Configure Meilisearch container (CF Tunnel via search.denizlg24.com, SSD data dir)
+- [x] Configure Meilisearch container (CF Tunnel via search.denizlg24.com, SSD data dir)
 - [ ] Set up shared package (types, DB schema with Drizzle, Meilisearch sync utility)
 - [ ] Search scoping API in admin-api (project/collection CRUD, tenant token issuance)
 - [ ] Implement auth system (registration, login, TOTP, recovery codes, API keys)
