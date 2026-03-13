@@ -23,7 +23,7 @@ describe("createProjectSearchKey", () => {
 
     expect(result.key).toBe("generated-key-abc");
     expect(result.uid).toBe("uid-123");
-
+    // biome-ignore lint/style/noNonNullAssertion: Testing description generation logic
     const call = mockClient.createKey.mock.calls[0]!;
     expect(call[0].actions).toEqual(["search"]);
     expect(call[0].indexes).toEqual(["my-project_*"]);
@@ -47,7 +47,7 @@ describe("createProjectSearchKey", () => {
     };
 
     await createProjectSearchKey(mockClient, "analytics");
-
+    // biome-ignore lint/style/noNonNullAssertion: Testing description generation logic
     const call = mockClient.createKey.mock.calls[0]!;
     expect(call[0].indexes[0]).toBe("analytics_*");
   });
@@ -68,7 +68,7 @@ describe("createProjectSearchKey", () => {
     };
 
     await createProjectSearchKey(mockClient, "test");
-
+    // biome-ignore lint/style/noNonNullAssertion: Testing description generation logic
     const call = mockClient.createKey.mock.calls[0]!;
     expect(call[0].expiresAt).toBeNull();
   });

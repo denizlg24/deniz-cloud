@@ -133,6 +133,7 @@ describe("ensureSharedFolder", () => {
       const existing = await mockDb.query.folders.findFirst();
       expect(existing).toBeUndefined();
       // insert chain
+      // biome-ignore lint/style/noNonNullAssertion: Testing DB logic with nulls
       const results = await mockDb.insert(null!).values(null!).onConflictDoNothing().returning();
       const result = results[0];
       expect(result?.path).toBe(SHARED_ROOT_PATH);
@@ -179,6 +180,7 @@ describe("ensureSharedFolder", () => {
       // Test the logic directly: first findFirst returns undefined, insert returns empty, re-fetch
       await mockDb.query.folders.findFirst();
       expect(findFirstCalls).toBe(1);
+      // biome-ignore lint/style/noNonNullAssertion: Testing DB logic with nulls
       const results = await mockDb.insert(null!).values(null!).onConflictDoNothing().returning();
       expect(results).toHaveLength(0);
       const refetched = await mockDb.query.folders.findFirst();
@@ -251,6 +253,7 @@ describe("initUserStorage", () => {
     if (process.platform === "win32") {
       const existing = await mockDb.query.folders.findFirst();
       expect(existing).toBeUndefined();
+      // biome-ignore lint/style/noNonNullAssertion: Testing DB logic with nulls
       const results = await mockDb.insert(null!).values(null!).onConflictDoNothing().returning();
       const result = results[0];
       expect(result?.path).toBe(expectedPath);
@@ -295,6 +298,7 @@ describe("initUserStorage", () => {
     if (process.platform === "win32") {
       await mockDb.query.folders.findFirst();
       expect(calls).toBe(1);
+      // biome-ignore lint/style/noNonNullAssertion: Testing DB logic with nulls
       const results = await mockDb.insert(null!).values(null!).onConflictDoNothing().returning();
       expect(results).toHaveLength(0);
       const refetched = await mockDb.query.folders.findFirst();
