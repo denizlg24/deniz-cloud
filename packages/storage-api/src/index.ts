@@ -7,8 +7,8 @@ import { config } from "./config";
 import { fileRoutes } from "./routes/files";
 import { folderRoutes } from "./routes/folders";
 import { uploadRoutes } from "./routes/uploads";
-import { initStorageDirs, ensureSharedFolder } from "./utils/storage";
 import { PathValidationError } from "./utils/path";
+import { ensureSharedFolder, initStorageDirs } from "./utils/storage";
 
 const db = createDb(config.databaseUrl);
 

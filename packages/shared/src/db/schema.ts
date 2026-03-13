@@ -20,11 +20,7 @@ export type UserRole = (typeof userRoleEnum.enumValues)[number];
 export const storageTierEnum = pgEnum("storage_tier", ["ssd", "hdd"]);
 export type StorageTier = (typeof storageTierEnum.enumValues)[number];
 
-export const uploadStatusEnum = pgEnum("upload_status", [
-  "in_progress",
-  "completed",
-  "expired",
-]);
+export const uploadStatusEnum = pgEnum("upload_status", ["in_progress", "completed", "expired"]);
 export type UploadStatus = (typeof uploadStatusEnum.enumValues)[number];
 
 export const users = pgTable("users", {
@@ -154,9 +150,7 @@ export const files = pgTable(
     checksum: varchar("checksum", { length: 64 }).notNull(),
     tier: storageTierEnum("tier").notNull().default("ssd"),
     diskPath: text("disk_path").notNull(),
-    lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }).notNull().defaultNow(),
     accessCount: integer("access_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -233,7 +227,11 @@ export const searchProjectsRelations = relations(searchProjects, ({ one }) => ({
 
 export const foldersRelations = relations(folders, ({ one, many }) => ({
   owner: one(users, { fields: [folders.ownerId], references: [users.id] }),
-  parent: one(folders, { fields: [folders.parentId], references: [folders.id], relationName: "parentChild" }),
+  parent: one(folders, {
+    fields: [folders.parentId],
+    references: [folders.id],
+    relationName: "parentChild",
+  }),
   children: many(folders, { relationName: "parentChild" }),
   files: many(files),
 }));
