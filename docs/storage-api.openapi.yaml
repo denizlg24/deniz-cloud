@@ -1,0 +1,1719 @@
+openapi: 3.1.0
+info:
+  title: Deniz Cloud Storage API
+  version: 1.0.0
+  description: |
+    Cloud storage API for Deniz Cloud self-hosted home server.
+    Provides file management (upload, download, rename, move, delete),
+    folder CRUD, and resumable uploads via the TUS protocol.
+
+    **Base URL:** `https://storage.denizlg24.com`
+
+    ## Authentication
+
+    All endpoints under `/api/uploads/*`, `/api/folders/*`, and `/api/files/*` require authentication.
+
+    Two authentication methods are supported:
+
+    - **Bearer Token (JWT):** Obtained via the admin API `POST /api/auth/login`. Pass as `Authorization: Bearer <token>`.
+    - **API Key:** Pass as `X-API-Key: <key>` header.
+
+    ## Access Control
+
+    - **Private folders** (`/{userId}/...`): Only the owning user can read/write.
+    - **Shared folders** (`/shared/...`): All authenticated users can read. Only the owner or a superuser can modify/delete.
+
+    ## Storage Tiering
+
+    Files are stored on SSD (hot) or HDD (cold) based on disk usage watermarks.
+    SSD files preserve directory structure; HDD files use a flat layout keyed by file ID.
+
+    ## TUS Resumable Uploads
+
+    File uploads use the [TUS protocol](https://tus.io/) v1.0.0 with `creation` and `termination` extensions.
+    Upload sessions expire after 24 hours. Expired sessions are cleaned up automatically.
+
+    ## Error Format
+
+    All errors follow a consistent shape:
+    ```json
+    {
+      "error": {
+        "code": "ERROR_CODE",
+        "message": "Human-readable description"
+      }
+    }
+    ```
+  contact:
+    name: Deniz Cloud
+    url: https://github.com/denizlg24/deniz-cloud
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: https://storage.denizlg24.com
+    description: Production (Cloudflare Tunnel)
+  - url: http://localhost:3001
+    description: Local development
+
+tags:
+  - name: Health
+    description: Service health checks
+  - name: Uploads
+    description: TUS v1.0.0 resumable file uploads
+  - name: Folders
+    description: Folder CRUD and navigation
+  - name: Files
+    description: File listing, details, download, rename/move, and deletion
+
+paths:
+  # ──────────────────────────────────────────────
+  # Health
+  # ──────────────────────────────────────────────
+
+  /api/health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      description: Returns service health status. No authentication required.
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+              example:
+                status: ok
+
+  # ──────────────────────────────────────────────
+  # Uploads (TUS protocol)
+  # ──────────────────────────────────────────────
+
+  /api/uploads:
+    options:
+      operationId: tusOptions
+      summary: TUS protocol discovery
+      description: |
+        Returns TUS server capabilities. No request body or authentication required
+        (auth middleware applies to all `/api/uploads/*`, but OPTIONS is handled first).
+
+        The response advertises supported TUS version, extensions, and the
+        `Tus-Resumable` header that all subsequent requests must include.
+      tags: [Uploads]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        "204":
+          description: TUS capabilities
+          headers:
+            Tus-Version:
+              schema:
+                type: string
+                const: 1.0.0
+              description: Supported TUS protocol versions
+            Tus-Extension:
+              schema:
+                type: string
+                const: creation,termination
+              description: Supported TUS extensions
+            Tus-Resumable:
+              schema:
+                type: string
+                const: 1.0.0
+              description: TUS protocol version used by this server
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      operationId: createUpload
+      summary: Create an upload session
+      description: |
+        Initiates a new TUS upload session. The client declares the total file size via
+        `Upload-Length` and provides file metadata (filename, target folder, optional MIME type)
+        via `Upload-Metadata`.
+
+        **Metadata format:** Comma-separated `key base64value` pairs.
+
+        **Required metadata keys:**
+        - `filename` — file name (will be normalized to snake_case, extension preserved)
+        - `targetFolder` — virtual path of the target folder (e.g., `/{userId}/documents`)
+
+        **Optional metadata keys:**
+        - `filetype` — MIME type (e.g., `text/plain`)
+
+        **Upload session lifetime:** 24 hours from creation. Expired sessions are cleaned up automatically.
+
+        On success, the `Location` header contains the upload URL for subsequent PATCH/HEAD/DELETE requests.
+      tags: [Uploads]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: Upload-Length
+          in: header
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+          description: Total file size in bytes
+        - name: Upload-Metadata
+          in: header
+          required: true
+          schema:
+            type: string
+          description: |
+            TUS metadata header. Comma-separated `key base64value` pairs.
+            Required keys: `filename`, `targetFolder`. Optional: `filetype`.
+          example: filename aGVsbG8udHh0,filetype dGV4dC9wbGFpbg==,targetFolder L3VzZXItaWQvZG9jcw==
+        - name: Tus-Resumable
+          in: header
+          required: true
+          schema:
+            type: string
+            const: 1.0.0
+          description: TUS protocol version
+      responses:
+        "201":
+          description: Upload session created
+          headers:
+            Location:
+              schema:
+                type: string
+              description: URL for subsequent upload operations (e.g., `/api/uploads/{id}`)
+              example: /api/uploads/550e8400-e29b-41d4-a716-446655440000
+            Upload-Offset:
+              schema:
+                type: integer
+                const: 0
+              description: Current upload offset (always 0 for new uploads)
+            Tus-Resumable:
+              schema:
+                type: string
+                const: 1.0.0
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingLength:
+                  summary: Missing Upload-Length header
+                  value:
+                    error:
+                      code: MISSING_UPLOAD_LENGTH
+                      message: Upload-Length header is required
+                invalidLength:
+                  summary: Invalid Upload-Length value
+                  value:
+                    error:
+                      code: INVALID_UPLOAD_LENGTH
+                      message: Upload-Length must be a non-negative integer
+                missingMetadata:
+                  summary: Missing Upload-Metadata header
+                  value:
+                    error:
+                      code: MISSING_METADATA
+                      message: Upload-Metadata header is required
+                missingFilename:
+                  summary: Missing filename in metadata
+                  value:
+                    error:
+                      code: MISSING_FILENAME
+                      message: filename is required in Upload-Metadata
+                missingTargetFolder:
+                  summary: Missing targetFolder in metadata
+                  value:
+                    error:
+                      code: MISSING_TARGET_FOLDER
+                      message: targetFolder is required in Upload-Metadata
+                invalidPath:
+                  summary: Invalid target folder path
+                  value:
+                    error:
+                      code: INVALID_PATH
+                      message: Path must start with /
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Access denied to target folder
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: ACCESS_DENIED
+                  message: You do not have access to this folder
+        "404":
+          description: Target folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: FOLDER_NOT_FOUND
+                  message: Target folder does not exist
+        "409":
+          description: File already exists at target path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: FILE_EXISTS
+                  message: A file already exists at this path
+
+  /api/uploads/{id}:
+    head:
+      operationId: getUploadStatus
+      summary: Query upload progress
+      description: |
+        Returns the current offset (bytes received) and total size for an in-progress upload.
+        Used by TUS clients to resume interrupted uploads.
+
+        Returns `404` if the upload does not exist or does not belong to the authenticated user.
+        Returns `410` if the upload is no longer in progress (completed, expired, or cancelled).
+      tags: [Uploads]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+      responses:
+        "200":
+          description: Upload is in progress
+          headers:
+            Upload-Offset:
+              schema:
+                type: integer
+                minimum: 0
+              description: Bytes received so far
+            Upload-Length:
+              schema:
+                type: integer
+                minimum: 0
+              description: Total declared file size in bytes
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Tus-Resumable:
+              schema:
+                type: string
+                const: 1.0.0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Upload not found or does not belong to user
+        "410":
+          description: Upload is no longer in progress (completed, expired, or cancelled)
+
+    patch:
+      operationId: uploadChunk
+      summary: Upload a file chunk
+      description: |
+        Appends a chunk of binary data to an in-progress upload. The `Upload-Offset` header
+        must match the server's current offset exactly (no out-of-order or duplicate chunks).
+
+        **Content-Type** must be `application/offset+octet-stream`.
+
+        When the final byte is received (`bytesReceived === Upload-Length`), the upload is
+        automatically finalized:
+        1. SHA-256 checksum is computed
+        2. Storage tier is determined (SSD if disk usage < watermark, else HDD)
+        3. File is moved from temp to final storage location
+        4. File record is created in the database
+        5. Upload status is set to `completed`
+      tags: [Uploads]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+        - name: Upload-Offset
+          in: header
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+          description: Current byte offset in the file (must match server state)
+        - name: Content-Type
+          in: header
+          required: true
+          schema:
+            type: string
+            const: application/offset+octet-stream
+          description: Must be `application/offset+octet-stream`
+      requestBody:
+        required: true
+        content:
+          application/offset+octet-stream:
+            schema:
+              type: string
+              format: binary
+              description: Raw binary chunk data
+      responses:
+        "204":
+          description: Chunk accepted
+          headers:
+            Upload-Offset:
+              schema:
+                type: integer
+                minimum: 0
+              description: New byte offset after this chunk
+            Tus-Resumable:
+              schema:
+                type: string
+                const: 1.0.0
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingOffset:
+                  summary: Missing Upload-Offset header
+                  value:
+                    error:
+                      code: MISSING_OFFSET
+                      message: Upload-Offset header is required
+                invalidOffset:
+                  summary: Invalid Upload-Offset value
+                  value:
+                    error:
+                      code: INVALID_OFFSET
+                      message: Upload-Offset must be a non-negative integer
+                emptyBody:
+                  summary: No chunk data in body
+                  value:
+                    error:
+                      code: EMPTY_BODY
+                      message: Request body is empty
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Upload not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: UPLOAD_NOT_FOUND
+                  message: Upload not found
+        "409":
+          description: Offset mismatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: OFFSET_MISMATCH
+                  message: "Expected offset 1024, got 0"
+        "410":
+          description: Upload is no longer in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                finished:
+                  summary: Upload already completed or cancelled
+                  value:
+                    error:
+                      code: UPLOAD_FINISHED
+                      message: Upload is no longer in progress
+                expired:
+                  summary: Upload session expired
+                  value:
+                    error:
+                      code: UPLOAD_EXPIRED
+                      message: Upload has expired
+        "413":
+          description: Upload exceeded declared size
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: SIZE_EXCEEDED
+                  message: Upload exceeded declared size
+        "415":
+          description: Wrong Content-Type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: INVALID_CONTENT_TYPE
+                  message: Content-Type must be application/offset+octet-stream
+
+    delete:
+      operationId: cancelUpload
+      summary: Cancel an upload (TUS termination)
+      description: |
+        Cancels an upload session and deletes the temporary file from disk.
+        The upload record is permanently removed from the database.
+      tags: [Uploads]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+      responses:
+        "204":
+          description: Upload cancelled and temp file deleted
+          headers:
+            Tus-Resumable:
+              schema:
+                type: string
+                const: 1.0.0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Upload not found or does not belong to user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: UPLOAD_NOT_FOUND
+                  message: Upload not found
+
+  # ──────────────────────────────────────────────
+  # Folders
+  # ──────────────────────────────────────────────
+
+  /api/folders/roots:
+    get:
+      operationId: getRootFolders
+      summary: Get root folders
+      description: |
+        Returns the authenticated user's personal root folder and the shared root folder.
+        Both are lazily created if they do not already exist.
+
+        - **User root:** `/{userId}` — private to the user
+        - **Shared root:** `/shared` — accessible to all authenticated users
+      tags: [Folders]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Root folders
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_RootFolders"
+              example:
+                data:
+                  userRoot:
+                    id: 550e8400-e29b-41d4-a716-446655440000
+                    path: /550e8400-e29b-41d4-a716-446655440000
+                    name: 550e8400-e29b-41d4-a716-446655440000
+                  sharedRoot:
+                    id: 660e8400-e29b-41d4-a716-446655440000
+                    path: /shared
+                    name: shared
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/folders:
+    post:
+      operationId: createFolder
+      summary: Create a folder
+      description: |
+        Creates a new folder under the specified parent. The folder name is normalized
+        to snake_case. A corresponding directory is created on disk (SSD storage).
+
+        **Name normalization:**
+        - Converted to snake_case
+        - Invalid characters (path separators, null bytes, etc.) are rejected
+      tags: [Folders]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFolderRequest"
+            example:
+              name: My Documents
+              parentId: 550e8400-e29b-41d4-a716-446655440000
+      responses:
+        "201":
+          description: Folder created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_FolderCreated"
+              example:
+                data:
+                  id: 770e8400-e29b-41d4-a716-446655440000
+                  path: /550e8400-e29b-41d4-a716-446655440000/my_documents
+                  name: my_documents
+                  parentId: 550e8400-e29b-41d4-a716-446655440000
+                  createdAt: "2026-03-13T12:00:00.000Z"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingName:
+                  summary: Missing folder name
+                  value:
+                    error:
+                      code: MISSING_NAME
+                      message: Folder name is required
+                missingParentId:
+                  summary: Missing parentId
+                  value:
+                    error:
+                      code: MISSING_PARENT_ID
+                      message: parentId is required
+                invalidName:
+                  summary: Invalid folder name
+                  value:
+                    error:
+                      code: INVALID_NAME
+                      message: Name contains invalid characters
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          description: Parent folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: PARENT_NOT_FOUND
+                  message: Parent folder not found
+        "409":
+          description: Folder already exists at target path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: FOLDER_EXISTS
+                  message: A folder already exists at this path
+
+  /api/folders/{id}:
+    get:
+      operationId: getFolder
+      summary: Get folder details
+      description: Returns metadata for a single folder.
+      tags: [Folders]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FolderId"
+      responses:
+        "200":
+          description: Folder details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_FolderDetail"
+              example:
+                data:
+                  id: 770e8400-e29b-41d4-a716-446655440000
+                  path: /550e8400-e29b-41d4-a716-446655440000/documents
+                  name: documents
+                  parentId: 550e8400-e29b-41d4-a716-446655440000
+                  ownerId: 550e8400-e29b-41d4-a716-446655440000
+                  createdAt: "2026-03-01T00:00:00.000Z"
+                  updatedAt: "2026-03-01T00:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          $ref: "#/components/responses/FolderNotFound"
+
+    patch:
+      operationId: updateFolder
+      summary: Rename or move a folder
+      description: |
+        Renames and/or moves a folder. At least one of `name` or `parentId` must be provided.
+        Root folders (`/{userId}` and `/shared`) cannot be modified.
+
+        When a folder is moved, all descendant folders and files have their paths updated
+        atomically within a database transaction. The corresponding directory is moved on disk.
+
+        **Validation:**
+        - Cannot move a folder into itself or any of its descendants (circular move)
+        - Target path must not already be occupied by another folder
+        - User must have access to both the folder and the target parent
+      tags: [Folders]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FolderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFolderRequest"
+            examples:
+              rename:
+                summary: Rename folder
+                value:
+                  name: new_name
+              move:
+                summary: Move to different parent
+                value:
+                  parentId: 880e8400-e29b-41d4-a716-446655440000
+              both:
+                summary: Rename and move
+                value:
+                  name: new_name
+                  parentId: 880e8400-e29b-41d4-a716-446655440000
+      responses:
+        "200":
+          description: Folder updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_FolderUpdated"
+              example:
+                data:
+                  id: 770e8400-e29b-41d4-a716-446655440000
+                  path: /550e8400-e29b-41d4-a716-446655440000/new_name
+                  name: new_name
+                  parentId: 550e8400-e29b-41d4-a716-446655440000
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                nothingToUpdate:
+                  summary: No changes provided
+                  value:
+                    error:
+                      code: NOTHING_TO_UPDATE
+                      message: Provide name or parentId
+                circularMove:
+                  summary: Circular move detected
+                  value:
+                    error:
+                      code: CIRCULAR_MOVE
+                      message: Cannot move a folder into itself or its descendant
+                invalidName:
+                  summary: Invalid folder name
+                  value:
+                    error:
+                      code: INVALID_NAME
+                      message: Name contains invalid characters
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Access denied or root folder
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                cannotModifyRoot:
+                  summary: Cannot modify root folders
+                  value:
+                    error:
+                      code: CANNOT_MODIFY_ROOT
+                      message: Cannot rename or move root folders
+                accessDenied:
+                  summary: Not the owner
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: You do not have access to this folder
+        "404":
+          description: Folder or target parent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                folderNotFound:
+                  summary: Folder not found
+                  value:
+                    error:
+                      code: FOLDER_NOT_FOUND
+                      message: Folder not found
+                parentNotFound:
+                  summary: Target parent not found
+                  value:
+                    error:
+                      code: PARENT_NOT_FOUND
+                      message: Target parent folder not found
+        "409":
+          description: Folder already exists at target path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: FOLDER_EXISTS
+                  message: A folder already exists at the target path
+
+    delete:
+      operationId: deleteFolder
+      summary: Delete a folder
+      description: |
+        Deletes an empty folder. The folder must contain no subfolders or files.
+        Root folders (`/{userId}` and `/shared`) cannot be deleted.
+
+        The directory is removed from disk and the database record is deleted.
+      tags: [Folders]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FolderId"
+      responses:
+        "200":
+          description: Folder deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_DeletedId"
+              example:
+                data:
+                  id: 770e8400-e29b-41d4-a716-446655440000
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Access denied or root folder
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                cannotDeleteRoot:
+                  summary: Cannot delete root folders
+                  value:
+                    error:
+                      code: CANNOT_DELETE_ROOT
+                      message: Cannot delete root folders
+                accessDenied:
+                  summary: Not the owner
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: You do not have access to this folder
+        "404":
+          $ref: "#/components/responses/FolderNotFound"
+        "409":
+          description: Folder is not empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: FOLDER_NOT_EMPTY
+                  message: Folder is not empty. Delete all contents first.
+
+  /api/folders/{id}/contents:
+    get:
+      operationId: listFolderContents
+      summary: List folder contents
+      description: |
+        Returns subfolders and files within a folder. Subfolders are returned in full
+        (ordered by name); files are paginated (ordered by `createdAt` descending).
+
+        The `pagination` object applies to files only. Subfolders are always returned
+        in their entirety.
+      tags: [Folders]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FolderId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Folder contents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse_FolderContents"
+              example:
+                data:
+                  folder:
+                    id: 770e8400-e29b-41d4-a716-446655440000
+                    path: /550e8400-e29b-41d4-a716-446655440000/documents
+                    name: documents
+                    parentId: 550e8400-e29b-41d4-a716-446655440000
+                  subfolders:
+                    - id: 880e8400-e29b-41d4-a716-446655440000
+                      name: reports
+                      path: /550e8400-e29b-41d4-a716-446655440000/documents/reports
+                      parentId: 770e8400-e29b-41d4-a716-446655440000
+                      createdAt: "2026-03-01T00:00:00.000Z"
+                  files:
+                    - id: 990e8400-e29b-41d4-a716-446655440000
+                      filename: report.pdf
+                      path: /550e8400-e29b-41d4-a716-446655440000/documents/report.pdf
+                      mimeType: application/pdf
+                      sizeBytes: 2048000
+                      tier: ssd
+                      createdAt: "2026-03-01T00:00:00.000Z"
+                      updatedAt: "2026-03-01T00:00:00.000Z"
+                pagination:
+                  page: 1
+                  limit: 50
+                  total: 1
+                  totalPages: 1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          $ref: "#/components/responses/FolderNotFound"
+
+  # ──────────────────────────────────────────────
+  # Files
+  # ──────────────────────────────────────────────
+
+  /api/files:
+    get:
+      operationId: listFiles
+      summary: List files in a folder
+      description: |
+        Returns a paginated list of files in the specified folder, ordered by `createdAt` descending.
+        The `folderId` query parameter is required.
+      tags: [Files]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: folderId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the folder to list files from
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated file list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse_FileSummary"
+              example:
+                data:
+                  - id: 990e8400-e29b-41d4-a716-446655440000
+                    filename: report.pdf
+                    path: /550e8400-e29b-41d4-a716-446655440000/documents/report.pdf
+                    mimeType: application/pdf
+                    sizeBytes: 2048000
+                    tier: ssd
+                    createdAt: "2026-03-01T00:00:00.000Z"
+                    updatedAt: "2026-03-01T00:00:00.000Z"
+                pagination:
+                  page: 1
+                  limit: 50
+                  total: 1
+                  totalPages: 1
+        "400":
+          description: Missing folderId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: MISSING_FOLDER_ID
+                  message: folderId query parameter is required
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          $ref: "#/components/responses/FolderNotFound"
+
+  /api/files/{id}:
+    get:
+      operationId: getFile
+      summary: Get file details
+      description: |
+        Returns full metadata for a single file, including checksum, storage tier,
+        access count, and last access timestamp.
+      tags: [Files]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+      responses:
+        "200":
+          description: File details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_FileDetail"
+              example:
+                data:
+                  id: 990e8400-e29b-41d4-a716-446655440000
+                  filename: report.pdf
+                  path: /550e8400-e29b-41d4-a716-446655440000/documents/report.pdf
+                  mimeType: application/pdf
+                  sizeBytes: 2048000
+                  checksum: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+                  tier: ssd
+                  lastAccessedAt: "2026-03-10T15:30:00.000Z"
+                  accessCount: 42
+                  createdAt: "2026-03-01T00:00:00.000Z"
+                  updatedAt: "2026-03-01T00:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/FileAccessDenied"
+        "404":
+          $ref: "#/components/responses/FileNotFound"
+
+    patch:
+      operationId: updateFile
+      summary: Rename or move a file
+      description: |
+        Renames and/or moves a file. At least one of `filename` or `folderId` must be provided.
+
+        **Filename normalization:**
+        - Converted to snake_case with extension preserved in lowercase
+        - Invalid characters are rejected
+
+        For SSD-tier files, the physical file is moved on disk. HDD-tier files use a flat
+        layout keyed by file ID, so only the database path is updated.
+
+        If the resulting path is identical to the current path (no actual changes),
+        the current file metadata is returned without modification.
+      tags: [Files]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFileRequest"
+            examples:
+              rename:
+                summary: Rename file
+                value:
+                  filename: new_report.pdf
+              move:
+                summary: Move to different folder
+                value:
+                  folderId: 880e8400-e29b-41d4-a716-446655440000
+              both:
+                summary: Rename and move
+                value:
+                  filename: new_report.pdf
+                  folderId: 880e8400-e29b-41d4-a716-446655440000
+      responses:
+        "200":
+          description: File updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_FileUpdated"
+              example:
+                data:
+                  id: 990e8400-e29b-41d4-a716-446655440000
+                  filename: new_report.pdf
+                  path: /550e8400-e29b-41d4-a716-446655440000/documents/new_report.pdf
+                  folderId: 770e8400-e29b-41d4-a716-446655440000
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                nothingToUpdate:
+                  summary: No changes provided
+                  value:
+                    error:
+                      code: NOTHING_TO_UPDATE
+                      message: Provide filename or folderId
+                invalidName:
+                  summary: Invalid filename
+                  value:
+                    error:
+                      code: INVALID_NAME
+                      message: Name contains invalid characters
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/FileAccessDenied"
+        "404":
+          description: File or target folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                fileNotFound:
+                  summary: File not found
+                  value:
+                    error:
+                      code: FILE_NOT_FOUND
+                      message: File not found
+                folderNotFound:
+                  summary: Target folder not found
+                  value:
+                    error:
+                      code: FOLDER_NOT_FOUND
+                      message: Target folder not found
+        "409":
+          description: File already exists at target path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: FILE_EXISTS
+                  message: A file already exists at the target path
+
+    delete:
+      operationId: deleteFile
+      summary: Delete a file
+      description: |
+        Deletes a file from disk and removes its database record.
+        Only the file owner or a superuser can delete a file.
+      tags: [Files]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+      responses:
+        "200":
+          description: File deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_DeletedId"
+              example:
+                data:
+                  id: 990e8400-e29b-41d4-a716-446655440000
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: ACCESS_DENIED
+                  message: You do not have permission to delete this file
+        "404":
+          $ref: "#/components/responses/FileNotFound"
+
+  /api/files/{id}/download:
+    get:
+      operationId: downloadFile
+      summary: Download a file
+      description: |
+        Streams the file contents. Supports HTTP range requests for partial content
+        (video seeking, download resumption, etc.).
+
+        - Without `?download` query param: `Content-Disposition: inline` (browser preview)
+        - With `?download` query param: `Content-Disposition: attachment` (force download)
+
+        Each download increments the file's `accessCount` and updates `lastAccessedAt`
+        asynchronously (does not block the response).
+      tags: [Files]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+        - name: download
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            If present (any value, including empty), forces `Content-Disposition: attachment`.
+            Omit for inline viewing.
+        - name: Range
+          in: header
+          required: false
+          schema:
+            type: string
+            pattern: ^bytes=\d+-\d*$
+          description: HTTP range request (e.g., `bytes=0-1023`)
+          example: bytes=0-1023
+      responses:
+        "200":
+          description: Full file content
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              description: File MIME type (falls back to `application/octet-stream`)
+            Content-Length:
+              schema:
+                type: integer
+              description: File size in bytes
+            Content-Disposition:
+              schema:
+                type: string
+              description: '`inline; filename="..."` or `attachment; filename="..."`'
+            Accept-Ranges:
+              schema:
+                type: string
+                const: bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Partial content (range request)
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+              description: Size of the returned range
+            Content-Range:
+              schema:
+                type: string
+              description: "Range returned (e.g., `bytes 0-1023/4096`)"
+            Accept-Ranges:
+              schema:
+                type: string
+                const: bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/FileAccessDenied"
+        "404":
+          $ref: "#/components/responses/FileNotFound"
+        "416":
+          description: Range not satisfiable
+          headers:
+            Content-Range:
+              schema:
+                type: string
+              description: "Total file size (e.g., `bytes */4096`)"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Session JWT obtained via `POST /api/auth/login` on the admin API.
+        Tokens expire after 24 hours by default.
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for programmatic access. Created via the admin panel.
+        Pass the raw key value (not hashed).
+
+  parameters:
+    UploadId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Upload session UUID (from the `Location` header of the creation response)
+    FolderId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Folder UUID
+    FileId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: File UUID
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Page number (minimum 1)
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+      description: Items per page (1-100, default 50)
+
+  responses:
+    Unauthorized:
+      description: Authentication required or invalid credentials
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            noAuth:
+              summary: No authentication provided
+              value:
+                error:
+                  code: UNAUTHORIZED
+                  message: Authentication required
+            tokenInvalid:
+              summary: JWT is invalid or expired
+              value:
+                error:
+                  code: TOKEN_INVALID
+                  message: Invalid or expired token
+            sessionInvalid:
+              summary: Session revoked or expired in DB
+              value:
+                error:
+                  code: SESSION_INVALID
+                  message: Session expired or revoked
+            apiKeyInvalid:
+              summary: API key not found
+              value:
+                error:
+                  code: INVALID_API_KEY
+                  message: Invalid API key
+            apiKeyExpired:
+              summary: API key past expiry
+              value:
+                error:
+                  code: API_KEY_EXPIRED
+                  message: API key expired
+
+    AccessDenied:
+      description: Access denied to the resource
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: ACCESS_DENIED
+              message: You do not have access to this folder
+
+    FolderNotFound:
+      description: Folder not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: FOLDER_NOT_FOUND
+              message: Folder not found
+
+    FileNotFound:
+      description: File not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: FILE_NOT_FOUND
+              message: File not found
+
+    FileAccessDenied:
+      description: Access denied to the file
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: ACCESS_DENIED
+              message: You do not have access to this file
+
+
+  schemas:
+    # --- Request Schemas ---
+
+    CreateFolderRequest:
+      type: object
+      required: [name, parentId]
+      properties:
+        name:
+          type: string
+          description: |
+            Folder name. Will be normalized to snake_case.
+            Must not contain path separators, null bytes, or other invalid characters.
+        parentId:
+          type: string
+          format: uuid
+          description: UUID of the parent folder
+
+    UpdateFolderRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: New folder name (will be normalized to snake_case)
+        parentId:
+          type: string
+          format: uuid
+          description: UUID of the new parent folder (to move the folder)
+
+    UpdateFileRequest:
+      type: object
+      properties:
+        filename:
+          type: string
+          description: New filename (will be normalized to snake_case, extension preserved)
+        folderId:
+          type: string
+          format: uuid
+          description: UUID of the target folder (to move the file)
+
+    # --- Response Schemas ---
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+            message:
+              type: string
+              description: Human-readable error message
+
+    StorageTier:
+      type: string
+      enum: [ssd, hdd]
+      description: Storage tier where the file resides
+
+    RootFolder:
+      type: object
+      required: [id, path, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        path:
+          type: string
+          description: Virtual path (e.g., `/{userId}` or `/shared`)
+        name:
+          type: string
+
+    FolderSummary:
+      type: object
+      required: [id, name, path, parentId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        path:
+          type: string
+        parentId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    FolderDetail:
+      type: object
+      required: [id, path, name, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        path:
+          type: string
+          description: Virtual path
+        name:
+          type: string
+        parentId:
+          type: ["string", "null"]
+          format: uuid
+          description: "Null for root folders"
+        ownerId:
+          type: ["string", "null"]
+          format: uuid
+          description: "Null for the `/shared` root folder"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    FolderRef:
+      type: object
+      required: [id, path, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        path:
+          type: string
+        name:
+          type: string
+        parentId:
+          type: ["string", "null"]
+          format: uuid
+
+    FileSummary:
+      type: object
+      required: [id, filename, path, sizeBytes, tier, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+          description: Normalized filename (snake_case)
+        path:
+          type: string
+          description: Virtual file path
+        mimeType:
+          type: ["string", "null"]
+          description: MIME type (from upload metadata)
+        sizeBytes:
+          type: integer
+          minimum: 0
+          description: File size in bytes
+        tier:
+          $ref: "#/components/schemas/StorageTier"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    FileDetail:
+      allOf:
+        - $ref: "#/components/schemas/FileSummary"
+        - type: object
+          required: [checksum, accessCount]
+          properties:
+            checksum:
+              type: string
+              description: SHA-256 hex digest
+              pattern: ^[a-f0-9]{64}$
+            lastAccessedAt:
+              type: ["string", "null"]
+              format: date-time
+              description: Timestamp of last download (null if never downloaded)
+            accessCount:
+              type: integer
+              minimum: 0
+              description: Number of times the file has been downloaded
+
+    FolderContents:
+      type: object
+      required: [folder, subfolders, files]
+      properties:
+        folder:
+          $ref: "#/components/schemas/FolderRef"
+        subfolders:
+          type: array
+          items:
+            $ref: "#/components/schemas/FolderSummary"
+          description: All direct child folders (not paginated, ordered by name)
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileSummary"
+          description: Direct child files (paginated, ordered by createdAt desc)
+
+    Pagination:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        total:
+          type: integer
+          minimum: 0
+          description: Total number of items
+        totalPages:
+          type: integer
+          minimum: 0
+          description: Total number of pages
+
+    # --- Wrapped Response Types ---
+
+    ApiResponse_RootFolders:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [userRoot, sharedRoot]
+          properties:
+            userRoot:
+              $ref: "#/components/schemas/RootFolder"
+            sharedRoot:
+              $ref: "#/components/schemas/RootFolder"
+
+    ApiResponse_FolderCreated:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/FolderSummary"
+
+    ApiResponse_FolderDetail:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/FolderDetail"
+
+    ApiResponse_FolderUpdated:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, path, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            path:
+              type: string
+            name:
+              type: string
+            parentId:
+              type: ["string", "null"]
+              format: uuid
+
+    ApiResponse_FileDetail:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/FileDetail"
+
+    ApiResponse_FileUpdated:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, filename, path, folderId]
+          properties:
+            id:
+              type: string
+              format: uuid
+            filename:
+              type: string
+            path:
+              type: string
+            folderId:
+              type: string
+              format: uuid
+
+    ApiResponse_DeletedId:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+              format: uuid
+
+    PaginatedResponse_FolderContents:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          $ref: "#/components/schemas/FolderContents"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    PaginatedResponse_FileSummary:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileSummary"
+        pagination:
+          $ref: "#/components/schemas/Pagination"

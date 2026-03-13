@@ -4,7 +4,7 @@ import { generateTenantToken } from "meilisearch/token";
 const DEFAULT_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export async function createProjectSearchKey(
-  client: MeiliSearch,
+  client: Pick<MeiliSearch, "createKey">,
   projectName: string,
 ): Promise<{ key: string; uid: string }> {
   const result = await client.createKey({
@@ -17,7 +17,7 @@ export async function createProjectSearchKey(
 }
 
 export async function deleteProjectSearchKey(
-  client: MeiliSearch,
+  client: Pick<MeiliSearch, "deleteKey">,
   apiKeyUid: string,
 ): Promise<void> {
   await client.deleteKey(apiKeyUid);

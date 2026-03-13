@@ -58,6 +58,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@deniz-cloud/shared": "workspace:*",
+        "drizzle-orm": "^0.45.1",
         "hono": "^4",
       },
       "devDependencies": {

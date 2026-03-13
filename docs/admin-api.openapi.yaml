@@ -1,0 +1,1029 @@
+openapi: 3.1.0
+info:
+  title: Deniz Cloud Admin API
+  version: 1.0.0
+  description: |
+    Admin panel API for Deniz Cloud self-hosted home server.
+    Provides authentication (password + TOTP 2FA), session management,
+    and Meilisearch project/collection administration.
+
+    **Base URL:** `https://cloud.denizlg24.com`
+
+    ## Authentication
+
+    All endpoints under `/api/search/*` require authentication **and** the `superuser` role.
+    Auth endpoints are selectively protected (login is public; me/logout require auth).
+
+    Two authentication methods are supported:
+
+    - **Bearer Token (JWT):** Obtained via `POST /api/auth/login`. Pass as `Authorization: Bearer <token>`.
+    - **API Key:** Pass as `X-API-Key: <key>` header.
+
+    ## Error Format
+
+    All errors follow a consistent shape:
+    ```json
+    {
+      "error": {
+        "code": "ERROR_CODE",
+        "message": "Human-readable description"
+      }
+    }
+    ```
+  contact:
+    name: Deniz Cloud
+    url: https://github.com/denizlg24/deniz-cloud
+  license:
+    name: MIT
+
+servers:
+  - url: https://cloud.denizlg24.com
+    description: Production (Cloudflare Tunnel)
+  - url: http://localhost:3002
+    description: Local development
+
+tags:
+  - name: Health
+    description: Service health checks
+  - name: Auth
+    description: Authentication, sessions, and user info
+  - name: Search Projects
+    description: Meilisearch project management (superuser only)
+  - name: Search Collections
+    description: Meilisearch collection/index management (superuser only)
+  - name: Search Tokens
+    description: Meilisearch tenant token generation (superuser only)
+
+paths:
+  /api/health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      description: Returns service health status. No authentication required.
+      tags: [Health]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+              example:
+                status: ok
+
+  /api/auth/login:
+    post:
+      operationId: login
+      summary: Login with password
+      description: |
+        Authenticates a user with username and password. If the user has TOTP enabled,
+        a TOTP code or recovery code must also be provided.
+
+        **Flow:**
+        1. Validate username + password
+        2. If TOTP is enabled and no code provided, return `401 TOTP_REQUIRED`
+        3. If TOTP code or recovery code is provided, verify it
+        4. Create a session (24h expiry) and return the JWT token
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              passwordOnly:
+                summary: Login without 2FA
+                value:
+                  username: admin
+                  password: my-secure-password-123
+              withTotp:
+                summary: Login with TOTP code
+                value:
+                  username: admin
+                  password: my-secure-password-123
+                  totpCode: "123456"
+              withRecovery:
+                summary: Login with recovery code
+                value:
+                  username: admin
+                  password: my-secure-password-123
+                  recoveryCode: "A1B2-C3D4"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_LoginData"
+              example:
+                data:
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  expiresAt: "2026-03-14T12:00:00.000Z"
+                  user:
+                    id: 550e8400-e29b-41d4-a716-446655440000
+                    username: admin
+                    email: admin@example.com
+                    role: superuser
+                    totpEnabled: true
+                    createdAt: "2026-01-01T00:00:00.000Z"
+                    updatedAt: "2026-01-01T00:00:00.000Z"
+        "400":
+          description: Invalid input or TOTP not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingFields:
+                  summary: Missing username or password
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: Username and password are required
+                totpNotConfigured:
+                  summary: TOTP not set up for this user
+                  value:
+                    error:
+                      code: TOTP_NOT_CONFIGURED
+                      message: TOTP not configured
+        "401":
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/TotpRequiredResponse"
+              examples:
+                invalidCredentials:
+                  summary: Wrong username or password
+                  value:
+                    error:
+                      code: INVALID_CREDENTIALS
+                      message: Invalid credentials
+                totpRequired:
+                  summary: TOTP code needed
+                  value:
+                    error:
+                      code: TOTP_REQUIRED
+                      message: Two-factor authentication required
+                    requiresRecoveryCode: true
+                invalidTotp:
+                  summary: Wrong TOTP code
+                  value:
+                    error:
+                      code: INVALID_TOTP
+                      message: Invalid TOTP token
+                invalidRecovery:
+                  summary: Wrong recovery code
+                  value:
+                    error:
+                      code: INVALID_RECOVERY_CODE
+                      message: Invalid recovery code
+
+  /api/auth/me:
+    get:
+      operationId: getCurrentUser
+      summary: Get current user
+      description: Returns the authenticated user's profile. Requires a valid session token or API key.
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_SafeUser"
+              example:
+                data:
+                  id: 550e8400-e29b-41d4-a716-446655440000
+                  username: admin
+                  email: admin@example.com
+                  role: superuser
+                  totpEnabled: true
+                  createdAt: "2026-01-01T00:00:00.000Z"
+                  updatedAt: "2026-01-01T00:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/logout:
+    post:
+      operationId: logout
+      summary: Logout / revoke session
+      description: |
+        Revokes the current session. If authenticated via Bearer token, the session
+        is deleted from the database. If authenticated via API key, no session is revoked
+        (API keys are not session-based).
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_Success"
+              example:
+                data:
+                  success: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/search/projects:
+    get:
+      operationId: listProjects
+      summary: List search projects
+      description: |
+        Returns a paginated list of all Meilisearch search projects.
+        Projects are ordered by `createdAt` descending (newest first).
+
+        **Note:** `meiliApiKey` and `meiliApiKeyUid` are never exposed in responses.
+      tags: [Search Projects]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Page number (minimum 1)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Items per page (1-100)
+      responses:
+        "200":
+          description: Paginated list of projects
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse_SearchProject"
+              example:
+                data:
+                  - id: 550e8400-e29b-41d4-a716-446655440000
+                    name: my-app
+                    description: Search indexes for my application
+                    ownerId: 660e8400-e29b-41d4-a716-446655440000
+                    createdAt: "2026-03-01T00:00:00.000Z"
+                    updatedAt: "2026-03-01T00:00:00.000Z"
+                pagination:
+                  page: 1
+                  limit: 20
+                  total: 1
+                  totalPages: 1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      operationId: createProject
+      summary: Create a search project
+      description: |
+        Creates a new Meilisearch search project. This provisions a dedicated
+        Meilisearch API key scoped to the project's indexes (`{projectName}_*`).
+
+        **Name constraints:**
+        - Required, non-empty string
+        - Max 50 characters
+        - Lowercase alphanumeric with hyphens only (no underscores)
+        - Must start and end with alphanumeric character
+        - Pattern: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+      tags: [Search Projects]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+            example:
+              name: my-app
+              description: Search indexes for my application
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_SearchProject"
+              example:
+                data:
+                  id: 550e8400-e29b-41d4-a716-446655440000
+                  name: my-app
+                  description: Search indexes for my application
+                  ownerId: 660e8400-e29b-41d4-a716-446655440000
+                  createdAt: "2026-03-01T00:00:00.000Z"
+                  updatedAt: "2026-03-01T00:00:00.000Z"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                nameRequired:
+                  summary: Name is missing
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: Project name is required
+                nameTooLong:
+                  summary: Name exceeds 50 characters
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: Project name must be 50 characters or fewer
+                nameInvalid:
+                  summary: Invalid name format
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: Project name must be lowercase alphanumeric with hyphens (no underscores)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/search/projects/{id}:
+    get:
+      operationId: getProject
+      summary: Get project with collections
+      description: |
+        Returns a single project's metadata along with all its Meilisearch collections (indexes).
+        Collections are discovered by querying Meilisearch for indexes with the project name prefix.
+      tags: [Search Projects]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project with collections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_SearchProjectWithCollections"
+              example:
+                data:
+                  id: 550e8400-e29b-41d4-a716-446655440000
+                  name: my-app
+                  description: Search indexes for my application
+                  ownerId: 660e8400-e29b-41d4-a716-446655440000
+                  createdAt: "2026-03-01T00:00:00.000Z"
+                  updatedAt: "2026-03-01T00:00:00.000Z"
+                  collections:
+                    - name: products
+                      uid: my-app_products
+                      primaryKey: id
+                      createdAt: "2026-03-01T00:00:00.000Z"
+                      updatedAt: "2026-03-01T00:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+    delete:
+      operationId: deleteProject
+      summary: Delete a search project
+      description: |
+        Deletes a search project, all its Meilisearch indexes, and its Meilisearch API key.
+        This is a destructive and irreversible operation.
+      tags: [Search Projects]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_DeletedId"
+              example:
+                data:
+                  id: 550e8400-e29b-41d4-a716-446655440000
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+  /api/search/projects/{id}/collections:
+    post:
+      operationId: createCollection
+      summary: Create a collection (Meilisearch index)
+      description: |
+        Creates a new Meilisearch index within a project. The index UID follows the
+        pattern `{projectName}_{collectionName}`.
+
+        **Name constraints:** Same as project names (lowercase alphanumeric + hyphens, 1-50 chars).
+      tags: [Search Collections]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCollectionRequest"
+            example:
+              name: products
+              primaryKey: id
+      responses:
+        "201":
+          description: Collection created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_CreatedCollection"
+              example:
+                data:
+                  name: products
+                  uid: my-app_products
+                  primaryKey: id
+                  taskUid: 42
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                nameRequired:
+                  summary: Name is missing
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: Collection name is required
+                nameInvalid:
+                  summary: Invalid name format
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: Collection name must be lowercase alphanumeric with hyphens (no underscores)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+  /api/search/projects/{id}/collections/{name}:
+    delete:
+      operationId: deleteCollection
+      summary: Delete a collection (Meilisearch index)
+      description: |
+        Deletes a Meilisearch index within a project. The index `{projectName}_{collectionName}`
+        is permanently removed along with all its documents.
+      tags: [Search Collections]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/CollectionName"
+      responses:
+        "200":
+          description: Collection deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_DeletedName"
+              example:
+                data:
+                  name: products
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+  /api/search/projects/{id}/tokens:
+    post:
+      operationId: generateToken
+      summary: Generate a Meilisearch tenant token
+      description: |
+        Generates a scoped Meilisearch tenant token (JWT) for a project. The token
+        is signed with the project's API key and restricts search access to indexes
+        matching `{projectName}_*`.
+
+        Clients can use this token to query Meilisearch directly without a proxy.
+
+        **Token expiry:** Configurable via `expiresInHours` (default 24h, max 720h / 30 days).
+      tags: [Search Tokens]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateTokenRequest"
+            example:
+              expiresInHours: 48
+      responses:
+        "200":
+          description: Tenant token generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_TenantToken"
+              example:
+                data:
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  expiresAt: "2026-03-15T12:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Session JWT obtained via `POST /api/auth/login`.
+        Tokens expire after 24 hours by default.
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for programmatic access. Created via the admin panel.
+        Pass the raw key value (not hashed).
+
+  parameters:
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Project UUID
+    CollectionName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+        maxLength: 50
+      description: Collection name (lowercase alphanumeric with hyphens)
+
+  responses:
+    Unauthorized:
+      description: Authentication required or invalid credentials
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            noAuth:
+              summary: No authentication provided
+              value:
+                error:
+                  code: UNAUTHORIZED
+                  message: Authentication required
+            tokenInvalid:
+              summary: JWT is invalid or expired
+              value:
+                error:
+                  code: TOKEN_INVALID
+                  message: Invalid or expired token
+            sessionInvalid:
+              summary: Session revoked or expired in DB
+              value:
+                error:
+                  code: SESSION_INVALID
+                  message: Session expired or revoked
+            apiKeyInvalid:
+              summary: API key not found
+              value:
+                error:
+                  code: INVALID_API_KEY
+                  message: Invalid API key
+            apiKeyExpired:
+              summary: API key past expiry
+              value:
+                error:
+                  code: API_KEY_EXPIRED
+                  message: API key expired
+
+    Forbidden:
+      description: Insufficient permissions (superuser role required)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: FORBIDDEN
+              message: Insufficient permissions
+
+    ProjectNotFound:
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: NOT_FOUND
+              message: Project not found
+
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: Internal server error
+
+  schemas:
+    # --- Request Schemas ---
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          description: User's username
+        password:
+          type: string
+          description: User's password
+        totpCode:
+          type: string
+          description: 6-digit TOTP code from authenticator app
+          pattern: ^\d{6}$
+        recoveryCode:
+          type: string
+          description: Recovery code (format XXXX-XXXX, hex uppercase)
+          pattern: ^[A-F0-9]{4}-[A-F0-9]{4}$
+
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+          description: |
+            Project name. Lowercase alphanumeric with hyphens.
+            No underscores. Must start and end with alphanumeric.
+        description:
+          type: ["string","null"]
+          description: Optional project description
+
+    CreateCollectionRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+          description: |
+            Collection name. Same constraints as project names.
+            The Meilisearch index UID will be `{projectName}_{collectionName}`.
+        primaryKey:
+          type: string
+          default: id
+          description: Primary key field for the Meilisearch index
+
+    GenerateTokenRequest:
+      type: object
+      properties:
+        expiresInHours:
+          type: "number"
+          minimum: 0
+          maximum: 720
+          default: 24
+          description: Token validity in hours (max 720 = 30 days). Defaults to 24.
+
+    # --- Response Schemas ---
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+            message:
+              type: string
+              description: Human-readable error message
+
+    TotpRequiredResponse:
+      type: object
+      required: [error, requiresRecoveryCode]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              const: TOTP_REQUIRED
+            message:
+              type: string
+              const: Two-factor authentication required
+        requiresRecoveryCode:
+          type: boolean
+          description: |
+            `true` if the user is a superuser (recovery codes are available as fallback).
+
+    SafeUser:
+      type: object
+      required: [id, username, role, totpEnabled, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: User UUID
+        username:
+          type: string
+          maxLength: 255
+          description: Unique username
+        email:
+          type: ["string","null"]
+          format: email
+          maxLength: 255
+          description: User email (optional)
+        role:
+          type: string
+          enum: [superuser, user]
+          description: User role
+        totpEnabled:
+          type: boolean
+          description: Whether TOTP 2FA is enabled
+        createdAt:
+          type: string
+          format: date-time
+          description: Account creation timestamp
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last profile update timestamp
+
+    SearchProject:
+      type: object
+      required: [id, name, ownerId, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Project UUID
+        name:
+          type: string
+          maxLength: 255
+          description: Unique project name
+        description:
+          type: ["string","null"]
+          description: Optional project description
+        ownerId:
+          type: string
+          format: uuid
+          description: UUID of the user who created this project
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      description: |
+        A search project. Note: `meiliApiKey` and `meiliApiKeyUid`
+        are internal fields and never exposed in API responses.
+
+    SearchCollection:
+      type: object
+      required: [name, uid]
+      properties:
+        name:
+          type: string
+          description: Collection name (parsed from index UID)
+        uid:
+          type: string
+          description: Full Meilisearch index UID (`{projectName}_{collectionName}`)
+        primaryKey:
+          type: ["string","null"]
+          description: Primary key field configured on the index
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SearchProjectWithCollections:
+      allOf:
+        - $ref: "#/components/schemas/SearchProject"
+        - type: object
+          required: [collections]
+          properties:
+            collections:
+              type: array
+              items:
+                $ref: "#/components/schemas/SearchCollection"
+
+    LoginData:
+      type: object
+      required: [token, expiresAt, user]
+      properties:
+        token:
+          type: string
+          description: JWT session token (HS256)
+        expiresAt:
+          type: string
+          format: date-time
+          description: Token expiration timestamp (default 24h from login)
+        user:
+          $ref: "#/components/schemas/SafeUser"
+
+    CreatedCollection:
+      type: object
+      required: [name, uid, primaryKey, taskUid]
+      properties:
+        name:
+          type: string
+          description: Collection name
+        uid:
+          type: string
+          description: Full Meilisearch index UID
+        primaryKey:
+          type: string
+          description: Primary key field
+        taskUid:
+          type: integer
+          description: Meilisearch task UID for index creation
+
+    TenantToken:
+      type: object
+      required: [token, expiresAt]
+      properties:
+        token:
+          type: string
+          description: Meilisearch tenant token (scoped JWT)
+        expiresAt:
+          type: string
+          format: date-time
+          description: Token expiration timestamp
+
+    # --- Wrapped Response Types ---
+
+    ApiResponse_LoginData:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/LoginData"
+
+    ApiResponse_SafeUser:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/SafeUser"
+
+    ApiResponse_Success:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [success]
+          properties:
+            success:
+              type: boolean
+              const: true
+
+    ApiResponse_SearchProject:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/SearchProject"
+
+    ApiResponse_SearchProjectWithCollections:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/SearchProjectWithCollections"
+
+    ApiResponse_DeletedId:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+              format: uuid
+
+    ApiResponse_DeletedName:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+
+    ApiResponse_CreatedCollection:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/CreatedCollection"
+
+    ApiResponse_TenantToken:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantToken"
+
+    PaginatedResponse_SearchProject:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchProject"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    Pagination:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        total:
+          type: integer
+          minimum: 0
+          description: Total number of items
+        totalPages:
+          type: integer
+          minimum: 0
+          description: Total number of pages
