@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { fetchFolderContents, fetchRoots } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import type { FolderContents, RootFolders } from "@/lib/types";
 
 interface CacheEntry {
@@ -104,11 +105,20 @@ export function FolderCacheProvider({ children }: { children: ReactNode }) {
     storeRef.current = new FolderCacheStore();
   }
 
+  const { isAuthenticated, user } = useAuth();
+
   const [roots, setRoots] = useState<RootFolders | null>(null);
   const [rootsLoading, setRootsLoading] = useState(true);
 
   useEffect(() => {
+    if (!isAuthenticated || !user?.totpEnabled) {
+      setRoots(null);
+      setRootsLoading(false);
+      return;
+    }
+
     let cancelled = false;
+    setRootsLoading(true);
 
     fetchRoots()
       .then((data) => {
@@ -124,7 +134,7 @@ export function FolderCacheProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated, user?.totpEnabled]);
 
   const value = useMemo(
     // biome-ignore lint/style/noNonNullAssertion: ref is initialized synchronously above

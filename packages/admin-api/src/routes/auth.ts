@@ -1,5 +1,10 @@
 import type { Database } from "@deniz-cloud/shared/db";
-import { type AuthVariables, auth, sessionCookieOptions } from "@deniz-cloud/shared/middleware";
+import {
+  type AuthVariables,
+  auth,
+  rateLimit,
+  sessionCookieOptions,
+} from "@deniz-cloud/shared/middleware";
 import {
   AuthError,
   createSession,
@@ -22,6 +27,8 @@ export function authRoutes({ db, jwtSecret, totpEncryptionKey, cookieName }: Aut
   const app = new Hono<{ Variables: AuthVariables }>();
   const authMw = auth(db, jwtSecret, cookieName);
   const { name: _name, ...cookieOptions } = sessionCookieOptions(cookieName);
+
+  app.use("/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }));
 
   app.post("/login", async (c) => {
     const body = await c.req.json();

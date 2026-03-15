@@ -1,4 +1,4 @@
-import type { ApiKey, SearchProject, Session, User, UserRole } from "../db/schema";
+import type { ApiKey, SearchProject, Session, User, UserRole, UserStatus } from "../db/schema";
 
 export type SafeUser = Omit<User, "passwordHash">;
 
@@ -27,4 +27,4 @@ export interface PaginatedResponse<T> {
   };
 }
 
-export type { SearchProject, UserRole };
+export type { SearchProject, UserRole, UserStatus };

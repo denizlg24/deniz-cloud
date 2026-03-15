@@ -51,6 +51,7 @@ export interface SafeUser {
   username: string;
   email: string | null;
   role: "superuser" | "user";
+  status: "pending" | "active";
   totpEnabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -90,6 +91,43 @@ export async function getMe(): Promise<SafeUser> {
 
 export async function logout(): Promise<void> {
   await request("/auth/logout", { method: "POST" });
+}
+
+export interface CompleteSignupInput {
+  username: string;
+  email: string;
+  password: string;
+}
+
+export async function completeSignup(input: CompleteSignupInput): Promise<LoginResponse["data"]> {
+  const res = await request<LoginResponse>("/auth/complete-signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return res.data;
+}
+
+interface SetupTotpResponse {
+  data: { uri: string };
+}
+
+export async function setupTotp(): Promise<string> {
+  const res = await request<SetupTotpResponse>("/auth/setup-totp", { method: "POST" });
+  return res.data.uri;
+}
+
+interface VerifyTotpResponse {
+  data: { recoveryCodes: string[] };
+}
+
+export async function verifyTotpSetup(code: string): Promise<string[]> {
+  const res = await request<VerifyTotpResponse>("/auth/verify-totp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  return res.data.recoveryCodes;
 }
 
 import type {
@@ -222,4 +260,19 @@ export async function deleteFile(fileId: string): Promise<void> {
 export function getDownloadUrl(fileId: string, forceDownload = false): string {
   const base = `${BASE}/files/${fileId}/download`;
   return forceDownload ? `${base}?download` : base;
+}
+
+export type ShareExpiresIn = "30m" | "1d" | "7d" | "30d" | "never";
+
+interface ShareLinkResponse {
+  data: { token: string };
+}
+
+export async function createShareLink(fileId: string, expiresIn: ShareExpiresIn): Promise<string> {
+  const res = await request<ShareLinkResponse>(`/files/${fileId}/share`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expiresIn }),
+  });
+  return `${window.location.origin}/api/share/${res.data.token}`;
 }

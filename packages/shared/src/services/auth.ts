@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { signSessionToken, verifySessionToken } from "../auth/jwt";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { generateRecoveryCodes, hashRecoveryCode } from "../auth/recovery";
@@ -74,11 +74,100 @@ export async function registerUser(
       passwordHash,
       email: input.email,
       role: input.role ?? "user",
+      status: "active",
     })
     .returning();
 
   if (!user) throw new Error("Failed to create user");
   return toSafeUser(user);
+}
+
+export async function createPendingUser(
+  db: Database,
+  input: { username: string; role?: UserRole },
+): Promise<SafeUser> {
+  const [user] = await db
+    .insert(users)
+    .values({
+      username: input.username,
+      role: input.role ?? "user",
+      status: "pending",
+    })
+    .returning();
+
+  if (!user) throw new Error("Failed to create user");
+  return toSafeUser(user);
+}
+
+export async function completeSignup(
+  db: Database,
+  input: { username: string; email: string; password: string },
+): Promise<SafeUser> {
+  const user = await db.query.users.findFirst({
+    where: eq(users.username, input.username),
+  });
+
+  if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
+  if (user.status !== "pending") {
+    throw new AuthError("Account already activated", "ALREADY_ACTIVE", 400);
+  }
+
+  const passwordHash = await hashPassword(input.password);
+
+  const [updated] = await db
+    .update(users)
+    .set({
+      email: input.email,
+      passwordHash,
+      status: "active",
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, user.id))
+    .returning();
+
+  if (!updated) throw new Error("Failed to complete signup");
+  return toSafeUser(updated);
+}
+
+export async function listUsers(
+  db: Database,
+  opts: { page?: number; limit?: number } = {},
+): Promise<{ users: SafeUser[]; total: number }> {
+  const page = opts.page ?? 1;
+  const limit = opts.limit ?? 50;
+  const offset = (page - 1) * limit;
+
+  const [allUsers, countResult] = await Promise.all([
+    db.select().from(users).orderBy(users.createdAt).limit(limit).offset(offset),
+    db.select({ count: sql<number>`count(*)::int` }).from(users),
+  ]);
+
+  return {
+    users: allUsers.map(toSafeUser),
+    total: countResult[0]?.count ?? 0,
+  };
+}
+
+export async function deleteUser(db: Database, userId: string): Promise<void> {
+  const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
+  if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
+  if (user.role === "superuser") {
+    throw new AuthError("Cannot delete superuser accounts", "FORBIDDEN", 403);
+  }
+
+  await db.delete(users).where(eq(users.id, userId));
+}
+
+export async function resetUserMfa(db: Database, userId: string): Promise<void> {
+  const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
+  if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
+
+  await db.delete(totpSecrets).where(eq(totpSecrets.userId, userId));
+  await db.delete(recoveryCodes).where(eq(recoveryCodes.userId, userId));
+  await db
+    .update(users)
+    .set({ totpEnabled: false, updatedAt: new Date() })
+    .where(eq(users.id, userId));
 }
 
 export async function loginWithPassword(
@@ -94,6 +183,14 @@ export async function loginWithPassword(
   });
   if (!user) {
     throw new AuthError("Invalid credentials", "INVALID_CREDENTIALS");
+  }
+
+  if (user.status === "pending") {
+    throw new AuthError("Account setup not completed", "ACCOUNT_PENDING", 403);
+  }
+
+  if (!user.passwordHash) {
+    throw new AuthError("Account setup not completed", "ACCOUNT_PENDING", 403);
   }
 
   const valid = await verifyPassword(input.password, user.passwordHash);

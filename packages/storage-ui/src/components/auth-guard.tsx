@@ -2,7 +2,7 @@ import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 
 export function AuthGuard() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
 
   if (isLoading) {
     return (
@@ -14,6 +14,10 @@ export function AuthGuard() {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (user && !user.totpEnabled) {
+    return <Navigate to="/setup-mfa" replace />;
   }
 
   return <Outlet />;

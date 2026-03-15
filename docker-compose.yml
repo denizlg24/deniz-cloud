@@ -132,6 +132,9 @@ services:
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
       MEILI_URL: http://meilisearch:7700
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
     depends_on:
       postgres:
         condition: service_healthy

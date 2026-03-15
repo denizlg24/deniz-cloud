@@ -13,6 +13,7 @@ info:
 
     All endpoints under `/api/uploads/*`, `/api/folders/*`, and `/api/files/*` require authentication.
     Auth endpoints (`/api/auth/me`, `/api/auth/logout`) also require authentication; login is public.
+    Share link downloads (`/api/share/{token}`) are public — authenticated via HMAC token in the URL.
 
     Two authentication methods are supported:
 
@@ -69,6 +70,8 @@ tags:
     description: Folder CRUD and navigation
   - name: Files
     description: File listing, details, download, rename/move, and deletion
+  - name: Share
+    description: Stateless HMAC-signed shareable file links (public download, no auth required)
 
 paths:
   # ──────────────────────────────────────────────
@@ -262,6 +265,130 @@ paths:
               example:
                 data:
                   success: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/complete-signup:
+    post:
+      operationId: completeSignup
+      summary: Complete a pending account signup
+      description: |
+        Activates a pending user account by setting email, password, and transitioning
+        status from "pending" to "active". Auto-creates a session (sets cookie).
+        The user should then proceed to set up TOTP.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, password]
+              properties:
+                username:
+                  type: string
+                  description: The assigned username
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        "200":
+          description: Signup completed, session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_LoginData"
+        "400":
+          description: Invalid input or account already active
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Username not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/auth/setup-totp:
+    post:
+      operationId: setupTotp
+      summary: Generate TOTP secret for setup
+      description: |
+        Generates a new TOTP secret and returns the otpauth URI for QR code display.
+        Requires authentication. Fails if TOTP is already enabled.
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: TOTP URI for QR code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [uri]
+                    properties:
+                      uri:
+                        type: string
+                        description: otpauth:// URI for authenticator apps
+        "400":
+          description: TOTP already enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/verify-totp:
+    post:
+      operationId: verifyTotpSetup
+      summary: Verify TOTP code and enable 2FA
+      description: |
+        Verifies a TOTP code to confirm the user has set up their authenticator app.
+        On success, enables TOTP for the user and returns recovery codes.
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  description: 6-digit TOTP code
+                  pattern: ^\d{6}$
+      responses:
+        "200":
+          description: TOTP enabled, recovery codes returned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [recoveryCodes]
+                    properties:
+                      recoveryCodes:
+                        type: array
+                        items:
+                          type: string
+                        description: One-time recovery codes (save securely)
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -1420,6 +1547,165 @@ paths:
                 type: string
               description: "Total file size (e.g., `bytes */4096`)"
 
+  /api/files/{id}/share:
+    post:
+      operationId: createShareLink
+      summary: Create a shareable link for a file
+      description: |
+        Generates a stateless HMAC-signed share token that encodes the file ID and expiration.
+        The returned token can be used to download the file without authentication via
+        `GET /api/share/{token}`.
+
+        Tokens are not stored in the database — they are verified by recomputing the HMAC signature.
+        Tokens cannot be revoked individually; they expire naturally.
+      tags: [Share]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShareLinkRequest"
+      responses:
+        "200":
+          description: Share token created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_ShareToken"
+              example:
+                data:
+                  token: "550e8400-e29b-41d4-a716-446655440000.1710547200000.a1b2c3d4e5f6..."
+        "400":
+          description: Invalid expiresIn value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: INVALID_EXPIRY
+                  message: "expiresIn must be one of: 30m, 1d, 7d, 30d, never"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/FileAccessDenied"
+        "404":
+          $ref: "#/components/responses/FileNotFound"
+
+  /api/share/{token}:
+    get:
+      operationId: downloadSharedFile
+      summary: Download a file via share link
+      description: |
+        Public endpoint — no authentication required.
+
+        Verifies the HMAC-signed token, checks expiration, and streams the file.
+        Supports HTTP range requests for partial content (video seeking, download resumption).
+
+        - Without `?download` query param: `Content-Disposition: inline` (browser preview)
+        - With `?download` query param: `Content-Disposition: attachment` (force download)
+
+        Each download increments the file's `accessCount` and updates `lastAccessedAt` asynchronously.
+      tags: [Share]
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+          description: |
+            HMAC-signed share token in format `{fileId}.{expiresAtMs}.{hmacHex}`.
+            Generated via `POST /api/files/{id}/share`.
+        - name: download
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            If present (any value, including empty), forces `Content-Disposition: attachment`.
+            Omit for inline viewing.
+        - name: Range
+          in: header
+          required: false
+          schema:
+            type: string
+            pattern: ^bytes=\d+-\d*$
+          description: HTTP range request (e.g., `bytes=0-1023`)
+          example: bytes=0-1023
+      responses:
+        "200":
+          description: Full file content
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              description: File MIME type (falls back to `application/octet-stream`)
+            Content-Length:
+              schema:
+                type: integer
+              description: File size in bytes
+            Content-Disposition:
+              schema:
+                type: string
+              description: '`inline; filename="..."` or `attachment; filename="..."`'
+            Accept-Ranges:
+              schema:
+                type: string
+                const: bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Partial content (range request)
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+              description: Size of the returned range
+            Content-Range:
+              schema:
+                type: string
+              description: "Range returned (e.g., `bytes 0-1023/4096`)"
+            Accept-Ranges:
+              schema:
+                type: string
+                const: bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "403":
+          description: Invalid or expired share link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: INVALID_SHARE_LINK
+                  message: Invalid or expired share link
+        "404":
+          $ref: "#/components/responses/FileNotFound"
+        "416":
+          description: Range not satisfiable
+          headers:
+            Content-Range:
+              schema:
+                type: string
+              description: "Total file size (e.g., `bytes */4096`)"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -1588,7 +1874,7 @@ components:
 
     SafeUser:
       type: object
-      required: [id, username, role, totpEnabled, createdAt, updatedAt]
+      required: [id, username, role, status, totpEnabled, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -1607,6 +1893,10 @@ components:
           type: string
           enum: [superuser, user]
           description: User role
+        status:
+          type: string
+          enum: [pending, active]
+          description: Account status — pending users have not completed signup yet
         totpEnabled:
           type: boolean
           description: Whether TOTP 2FA is enabled
@@ -2001,3 +2291,34 @@ components:
             $ref: "#/components/schemas/FileSummary"
         pagination:
           $ref: "#/components/schemas/Pagination"
+
+    # --- Share Schemas ---
+
+    CreateShareLinkRequest:
+      type: object
+      required: [expiresIn]
+      properties:
+        expiresIn:
+          type: string
+          enum: [30m, 1d, 7d, 30d, never]
+          description: |
+            How long the share link remains valid.
+            - `30m` — 30 minutes
+            - `1d` — 1 day
+            - `7d` — 1 week
+            - `30d` — 1 month
+            - `never` — no expiration
+
+    ApiResponse_ShareToken:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: |
+                HMAC-signed share token in format `{fileId}.{expiresAtMs}.{hmacHex}`.
+                Use at `GET /api/share/{token}` to download the file without authentication.

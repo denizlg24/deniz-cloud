@@ -17,6 +17,9 @@ export const userRoleEnum = pgEnum("user_role", ["superuser", "user"]);
 
 export type UserRole = (typeof userRoleEnum.enumValues)[number];
 
+export const userStatusEnum = pgEnum("user_status", ["pending", "active"]);
+export type UserStatus = (typeof userStatusEnum.enumValues)[number];
+
 export const storageTierEnum = pgEnum("storage_tier", ["ssd", "hdd"]);
 export type StorageTier = (typeof storageTierEnum.enumValues)[number];
 
@@ -27,8 +30,9 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   username: varchar("username", { length: 255 }).notNull().unique(),
   email: varchar("email", { length: 255 }),
-  passwordHash: text("password_hash").notNull(),
+  passwordHash: text("password_hash"),
   role: userRoleEnum("role").notNull().default("user"),
+  status: userStatusEnum("status").notNull().default("active"),
   totpEnabled: boolean("totp_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

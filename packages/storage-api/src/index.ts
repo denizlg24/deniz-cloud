@@ -8,6 +8,7 @@ import { config } from "./config";
 import { authRoutes } from "./routes/auth";
 import { fileRoutes } from "./routes/files";
 import { folderRoutes } from "./routes/folders";
+import { shareRoutes } from "./routes/share";
 import { uploadRoutes } from "./routes/uploads";
 import { PathValidationError } from "./utils/path";
 import { ensureSharedFolder, initStorageDirs } from "./utils/storage";
@@ -38,6 +39,8 @@ app.onError((err, c) => {
 });
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
+
+app.route("/api/share", shareRoutes({ db, jwtSecret: config.jwtSecret }));
 
 const COOKIE_NAME = "dc_storage_session";
 
@@ -77,7 +80,10 @@ app.route(
 );
 
 app.use("/api/files/*", authMiddleware);
-app.route("/api/files", fileRoutes({ db, ssdStoragePath: config.ssdStoragePath }));
+app.route(
+  "/api/files",
+  fileRoutes({ db, ssdStoragePath: config.ssdStoragePath, jwtSecret: config.jwtSecret }),
+);
 
 app.all("/api/*", (c) =>
   c.json({ error: { code: "NOT_FOUND", message: "Endpoint not found" } }, 404),

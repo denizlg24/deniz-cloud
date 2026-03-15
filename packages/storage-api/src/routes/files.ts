@@ -14,10 +14,12 @@ import {
   PathValidationError,
   resolveSsdDiskPath,
 } from "../utils/path";
+import { generateShareToken, isValidExpiresIn } from "../utils/share";
 
 interface FileRouteDeps {
   db: Database;
   ssdStoragePath: string;
+  jwtSecret: string;
 }
 
 function canModify(user: SafeUser, resourceOwnerId: string): boolean {
@@ -31,7 +33,7 @@ function parentPath(filePath: string): string {
   return lastSlash <= 0 ? "/" : filePath.slice(0, lastSlash);
 }
 
-export function fileRoutes({ db, ssdStoragePath }: FileRouteDeps) {
+export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
   const router = new Hono<{ Variables: AuthVariables }>();
 
   router.get("/", async (c) => {
@@ -363,6 +365,50 @@ export function fileRoutes({ db, ssdStoragePath }: FileRouteDeps) {
         path: newPath,
         folderId: targetFolderId,
       },
+    });
+  });
+
+  router.post("/:id/share", async (c) => {
+    const user = c.get("user");
+    const fileId = c.req.param("id");
+    const body = await c.req.json();
+    const expiresIn: string = body.expiresIn;
+
+    if (!expiresIn || !isValidExpiresIn(expiresIn)) {
+      return c.json(
+        {
+          error: {
+            code: "INVALID_EXPIRY",
+            message: "expiresIn must be one of: 30m, 1d, 7d, 30d, never",
+          },
+        },
+        400,
+      );
+    }
+
+    const file = await db.query.files.findFirst({
+      where: eq(files.id, fileId),
+    });
+    if (!file) {
+      return c.json({ error: { code: "FILE_NOT_FOUND", message: "File not found" } }, 404);
+    }
+
+    if (!canModify(user, file.ownerId)) {
+      return c.json(
+        {
+          error: {
+            code: "ACCESS_DENIED",
+            message: "You do not have permission to share this file",
+          },
+        },
+        403,
+      );
+    }
+
+    const token = generateShareToken(fileId, expiresIn, jwtSecret);
+
+    return c.json({
+      data: { token },
     });
   });
 

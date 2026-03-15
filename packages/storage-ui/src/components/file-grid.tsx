@@ -24,6 +24,7 @@ interface FileGridProps {
   onDeleteFolder: (folder: StorageFolder) => void;
   onRenameFile: (file: StorageFile) => void;
   onDeleteFile: (file: StorageFile) => void;
+  onShareFile: (file: StorageFile) => void;
   onUpload: () => void;
   onCreateFolder: () => void;
   onHoverFolder?: (folder: StorageFolder) => void;
@@ -71,6 +72,7 @@ export function FileGrid({
   onDeleteFolder,
   onRenameFile,
   onDeleteFile,
+  onShareFile,
   onUpload,
   onCreateFolder,
   onHoverFolder,
@@ -128,6 +130,7 @@ export function FileGrid({
             onDownload={onDownloadFile}
             onRename={onRenameFile}
             onDelete={onDeleteFile}
+            onShare={onShareFile}
           />
         ))}
       </div>
@@ -172,6 +175,7 @@ export function FileGrid({
                 onDownload={onDownloadFile}
                 onRename={onRenameFile}
                 onDelete={onDeleteFile}
+                onShare={onShareFile}
               />
             ))}
           </div>

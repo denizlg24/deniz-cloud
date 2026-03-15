@@ -8,6 +8,7 @@ import { FileGridSkeleton } from "@/components/file-grid-skeleton";
 import { FilePreview } from "@/components/file-preview";
 import { FolderBreadcrumbs } from "@/components/folder-breadcrumbs";
 import { RenameDialog } from "@/components/rename-dialog";
+import { ShareDialog } from "@/components/share-dialog";
 import { UploadZone } from "@/components/upload-zone";
 import { useActiveRoot } from "@/hooks/use-active-root";
 import { useFolderCache, useFolderContents, useRoots } from "@/hooks/use-folder-cache";
@@ -49,6 +50,7 @@ export function FileBrowser() {
     parentFolderId: string;
   } | null>(null);
   const [previewFile, setPreviewFile] = useState<StorageFile | null>(null);
+  const [shareFile, setShareFile] = useState<StorageFile | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
 
   useEffect(() => {
@@ -230,6 +232,7 @@ export function FileBrowser() {
             onDeleteFolder={handleDeleteFolder}
             onRenameFile={handleRenameFile}
             onDeleteFile={handleDeleteFile}
+            onShareFile={setShareFile}
             onUpload={handleUploadClick}
             onCreateFolder={() => setCreateFolderOpen(true)}
             onHoverFolder={handleHoverFolder}
@@ -256,6 +259,8 @@ export function FileBrowser() {
           )}
         </>
       )}
+
+      <ShareDialog file={shareFile} onClose={() => setShareFile(null)} />
 
       <FilePreview
         file={previewFile}

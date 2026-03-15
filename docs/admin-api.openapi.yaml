@@ -13,7 +13,7 @@ info:
 
     **Only superusers can login to this API.** Non-superuser login attempts are rejected with `403 FORBIDDEN`.
 
-    All endpoints under `/api/search/*` additionally require the `superuser` role via middleware.
+    All endpoints under `/api/users/*`, `/api/stats/*`, and `/api/search/*` additionally require the `superuser` role via middleware.
     Auth endpoints are selectively protected (login is public; me/logout require auth).
 
     Two authentication methods are supported:
@@ -49,6 +49,10 @@ tags:
     description: Service health checks
   - name: Auth
     description: Authentication, sessions, and user info
+  - name: Users
+    description: User management — create, list, delete, reset MFA (superuser only)
+  - name: Stats
+    description: System and storage statistics (superuser only)
   - name: Search Projects
     description: Meilisearch project management (superuser only)
   - name: Search Collections
@@ -253,6 +257,164 @@ paths:
                   success: true
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /api/users:
+    get:
+      operationId: listUsers
+      summary: List all users
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse_SafeUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createUser
+      summary: Create a pending user
+      description: Creates a user with status "pending". The user completes signup on the storage portal.
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_SafeUser"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/users/{id}:
+    delete:
+      operationId: deleteUser
+      summary: Delete a user
+      description: Permanently deletes a user and all their data. Cannot delete superuser accounts.
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: User deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_Success"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/users/{id}/reset-mfa:
+    post:
+      operationId: resetUserMfa
+      summary: Reset a user's MFA
+      description: Disables TOTP and deletes recovery codes. The user must set up MFA again.
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: MFA reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_Success"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/stats/system:
+    get:
+      operationId: getSystemStats
+      summary: Get system resource usage
+      description: Returns CPU, memory, and disk usage from the host system.
+      tags: [Stats]
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: System stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_SystemStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/stats/storage:
+    get:
+      operationId: getStorageStats
+      summary: Get storage statistics
+      description: Returns file counts, total sizes, per-tier breakdown, user and session counts.
+      tags: [Stats]
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Storage stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_StorageStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /api/search/projects:
     get:
@@ -798,7 +960,7 @@ components:
 
     SafeUser:
       type: object
-      required: [id, username, role, totpEnabled, createdAt, updatedAt]
+      required: [id, username, role, status, totpEnabled, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -817,6 +979,10 @@ components:
           type: string
           enum: [superuser, user]
           description: User role
+        status:
+          type: string
+          enum: [pending, active]
+          description: Account status — pending users have not completed signup yet
         totpEnabled:
           type: boolean
           description: Whether TOTP 2FA is enabled
@@ -1019,6 +1185,112 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SearchProject"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    CreateUserRequest:
+      type: object
+      required: [username]
+      properties:
+        username:
+          type: string
+          pattern: ^[a-z0-9_-]{3,50}$
+          description: Username (3-50 chars, lowercase alphanumeric, hyphens, underscores)
+        role:
+          type: string
+          enum: [user, superuser]
+          default: user
+
+    SystemStats:
+      type: object
+      required: [cpu, memory, disk, timestamp]
+      properties:
+        cpu:
+          type: object
+          properties:
+            usagePercent: { type: number }
+            cores: { type: integer }
+        memory:
+          type: object
+          properties:
+            totalBytes: { type: integer }
+            usedBytes: { type: integer }
+            availableBytes: { type: integer }
+            usagePercent: { type: number }
+        disk:
+          type: array
+          items:
+            type: object
+            properties:
+              mount: { type: string }
+              totalBytes: { type: integer }
+              usedBytes: { type: integer }
+              availableBytes: { type: integer }
+              usagePercent: { type: number }
+        timestamp:
+          type: string
+          format: date-time
+
+    StorageStats:
+      type: object
+      required: [files, tiers, folders, users, activeSessions, timestamp]
+      properties:
+        files:
+          type: object
+          properties:
+            count: { type: integer }
+            totalSizeBytes: { type: integer }
+        tiers:
+          type: object
+          properties:
+            ssd:
+              type: object
+              properties:
+                fileCount: { type: integer }
+                totalSizeBytes: { type: integer }
+            hdd:
+              type: object
+              properties:
+                fileCount: { type: integer }
+                totalSizeBytes: { type: integer }
+        folders:
+          type: object
+          properties:
+            count: { type: integer }
+        users:
+          type: object
+          properties:
+            count: { type: integer }
+        activeSessions:
+          type: object
+          properties:
+            count: { type: integer }
+        timestamp:
+          type: string
+          format: date-time
+
+    ApiResponse_SystemStats:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/SystemStats"
+
+    ApiResponse_StorageStats:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/StorageStats"
+
+    PaginatedResponse_SafeUser:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SafeUser"
         pagination:
           $ref: "#/components/schemas/Pagination"
 

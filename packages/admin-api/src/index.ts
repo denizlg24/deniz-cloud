@@ -7,6 +7,8 @@ import { serveStatic } from "hono/bun";
 import { config } from "./config";
 import { authRoutes } from "./routes/auth";
 import { searchRoutes } from "./routes/search";
+import { statsRoutes } from "./routes/stats";
+import { userRoutes } from "./routes/users";
 
 const db = createDb(config.databaseUrl);
 const meiliClient = createMeiliClient(config.meiliUrl, config.meiliMasterKey);
@@ -40,6 +42,14 @@ app.route(
     cookieName: COOKIE_NAME,
   }),
 );
+
+app.use("/api/users/*", auth(db, config.jwtSecret, COOKIE_NAME));
+app.use("/api/users/*", requireRole("superuser"));
+app.route("/api/users", userRoutes({ db }));
+
+app.use("/api/stats/*", auth(db, config.jwtSecret, COOKIE_NAME));
+app.use("/api/stats/*", requireRole("superuser"));
+app.route("/api/stats", statsRoutes({ db }));
 
 app.use("/api/search/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/search/*", requireRole("superuser"));

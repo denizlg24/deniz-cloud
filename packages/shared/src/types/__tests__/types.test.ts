@@ -16,6 +16,7 @@ describe("SafeUser", () => {
       username: "admin",
       email: "admin@test.com",
       role: "superuser",
+      status: "active",
       totpEnabled: false,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -40,6 +41,7 @@ describe("SafeUser", () => {
       | "username"
       | "email"
       | "role"
+      | "status"
       | "totpEnabled"
       | "createdAt"
       | "updatedAt";

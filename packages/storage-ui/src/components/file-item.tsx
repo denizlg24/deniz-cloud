@@ -1,4 +1,11 @@
-import { DownloadIcon, EyeIcon, MoreHorizontalIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import {
+  DownloadIcon,
+  EyeIcon,
+  LinkIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { FileIconDisplay } from "@/components/file-icon";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,9 +25,18 @@ interface FileItemProps {
   onDownload: (file: StorageFile) => void;
   onRename: (file: StorageFile) => void;
   onDelete: (file: StorageFile) => void;
+  onShare: (file: StorageFile) => void;
 }
 
-export function FileItem({ file, view, onPreview, onDownload, onRename, onDelete }: FileItemProps) {
+export function FileItem({
+  file,
+  view,
+  onPreview,
+  onDownload,
+  onRename,
+  onDelete,
+  onShare,
+}: FileItemProps) {
   const canPreview = isPreviewable(file.mimeType);
   const isImage = file.mimeType?.startsWith("image/") ?? false;
 
@@ -58,6 +74,7 @@ export function FileItem({ file, view, onPreview, onDownload, onRename, onDelete
           onDownload={onDownload}
           onRename={onRename}
           onDelete={onDelete}
+          onShare={onShare}
         />
       </div>
     );
@@ -80,6 +97,7 @@ export function FileItem({ file, view, onPreview, onDownload, onRename, onDelete
           onDownload={onDownload}
           onRename={onRename}
           onDelete={onDelete}
+          onShare={onShare}
         />
       </div>
 
@@ -106,6 +124,7 @@ function FileActions({
   onDownload,
   onRename,
   onDelete,
+  onShare,
 }: {
   file: StorageFile;
   canPreview: boolean;
@@ -113,6 +132,7 @@ function FileActions({
   onDownload: (file: StorageFile) => void;
   onRename: (file: StorageFile) => void;
   onDelete: (file: StorageFile) => void;
+  onShare: (file: StorageFile) => void;
 }) {
   return (
     <DropdownMenu>
@@ -135,6 +155,10 @@ function FileActions({
         <DropdownMenuItem onClick={() => onDownload(file)}>
           <DownloadIcon className="size-4" />
           Download
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onShare(file)}>
+          <LinkIcon className="size-4" />
+          Share
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => onRename(file)}>

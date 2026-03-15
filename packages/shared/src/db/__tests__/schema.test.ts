@@ -38,8 +38,6 @@ describe("uploadStatusEnum", () => {
   });
 });
 
-// --- Table column presence tests ---
-
 describe("users table", () => {
   it("has all expected columns", () => {
     const columns = Object.keys(users);
@@ -48,6 +46,7 @@ describe("users table", () => {
     expect(columns).toContain("email");
     expect(columns).toContain("passwordHash");
     expect(columns).toContain("role");
+    expect(columns).toContain("status");
     expect(columns).toContain("totpEnabled");
     expect(columns).toContain("createdAt");
     expect(columns).toContain("updatedAt");
@@ -159,9 +158,9 @@ describe("tusUploads table", () => {
 });
 
 describe("Inferred types", () => {
-  it("User has passwordHash as string", () => {
-    // Type-level: this compiles only if User has passwordHash
-    type Check = User["passwordHash"] extends string ? true : false;
+  it("User has passwordHash as string or null", () => {
+    // Type-level: passwordHash is now nullable for pending users
+    type Check = User["passwordHash"] extends string | null ? true : false;
     const check: Check = true;
     expect(check).toBe(true);
   });
@@ -186,7 +185,10 @@ describe("Inferred types", () => {
   it("TusUpload metadata is a Record<string, string> or null", () => {
     // The jsonb column with $type should allow Record<string, string> | null
     type MetadataType = TusUpload["metadata"];
-    const metadata: MetadataType = { filename: "test.pdf", mimetype: "application/pdf" };
+    const metadata: MetadataType = {
+      filename: "test.pdf",
+      mimetype: "application/pdf",
+    };
     expect(metadata).not.toBeNull();
 
     const nullMetadata: MetadataType = null;

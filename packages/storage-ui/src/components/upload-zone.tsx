@@ -125,11 +125,8 @@ export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZ
 
   useEffect(() => {
     if (!allSucceeded) return;
-    const timer = setTimeout(() => {
-      setUploads([]);
-      onOpenChange(false);
-    }, 1500);
-    return () => clearTimeout(timer);
+    setUploads([]);
+    onOpenChange(false);
   }, [allSucceeded, onOpenChange]);
 
   return (
