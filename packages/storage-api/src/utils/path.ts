@@ -1,3 +1,5 @@
+import { join } from "node:path/posix";
+
 const INVALID_SEGMENTS = new Set([".", ".."]);
 const MAX_SEGMENT_LENGTH = 255;
 
@@ -80,11 +82,12 @@ export function joinPath(...segments: string[]): string {
 }
 
 export function resolveSsdDiskPath(basePath: string, virtualPath: string): string {
-  return joinPath(basePath, virtualPath);
+  const resolved = join(basePath, virtualPath);
+  return resolved.length > 1 ? resolved.replace(/\/$/, "") : resolved;
 }
 
 export function resolveHddDiskPath(basePath: string, fileId: string): string {
-  return joinPath(basePath, fileId);
+  return join(basePath, fileId);
 }
 
 export function buildUserRootPath(userId: string): string {

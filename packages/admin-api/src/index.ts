@@ -3,6 +3,7 @@ import { auth, requireRole } from "@deniz-cloud/shared/middleware";
 import { createMeiliClient } from "@deniz-cloud/shared/search";
 import { AuthError } from "@deniz-cloud/shared/services";
 import { Hono } from "hono";
+import { serveStatic } from "hono/bun";
 import { config } from "./config";
 import { authRoutes } from "./routes/auth";
 import { searchRoutes } from "./routes/search";
@@ -28,14 +29,28 @@ app.onError((err, c) => {
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 
+const COOKIE_NAME = "dc_admin_session";
+
 app.route(
   "/api/auth",
-  authRoutes({ db, jwtSecret: config.jwtSecret, totpEncryptionKey: config.totpEncryptionKey }),
+  authRoutes({
+    db,
+    jwtSecret: config.jwtSecret,
+    totpEncryptionKey: config.totpEncryptionKey,
+    cookieName: COOKIE_NAME,
+  }),
 );
 
-app.use("/api/search/*", auth(db, config.jwtSecret));
+app.use("/api/search/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/search/*", requireRole("superuser"));
 app.route("/api/search", searchRoutes({ db, meiliClient }));
+
+app.all("/api/*", (c) =>
+  c.json({ error: { code: "NOT_FOUND", message: "Endpoint not found" } }, 404),
+);
+
+app.use("*", serveStatic({ root: "./static" }));
+app.get("*", serveStatic({ root: "./static", rewriteRequestPath: () => "/index.html" }));
 
 export default {
   port: config.port,

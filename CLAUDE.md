@@ -117,14 +117,21 @@ Total ~1.45GB for containers, ~2.55GB for OS/cache/host services (cloudflared ru
 - [x] Superuser seed CLI (`bun run seed:admin` in admin-api)
 - [x] Unit tests (40 passing) — password, TOTP, JWT, recovery codes, search indexes, env
 
-### Next: Phase 2 (Storage Service)
-- [ ] Build storage API (Hono): upload, download, delete, rename, move, folder CRUD
-- [ ] Implement file metadata in Postgres via Drizzle
-- [ ] Build tiering engine: SSD/HDD migration logic, on-access promotion
-- [ ] Set up tiering cron job
-- [ ] Build storage web UI: file browser, upload, folder navigation
-- [ ] Add file previews (images, PDFs, video streaming, code)
-- [ ] Implement shareable public links
+### Phase 2: Storage Service — IN PROGRESS
+- [x] Storage API (Hono): TUS resumable upload, download, delete, rename, move, folder CRUD
+- [x] File metadata in Postgres via Drizzle
+- [x] Storage API auth routes — login (password+TOTP), logout, me (cookie-based sessions)
+- [x] Storage API seed CLI (`bun run seed:storage`)
+- [x] Cookie middleware in shared — `setCookieToken()` / `clearCookieToken()` for httpOnly cookie auth
+- [x] Auth middleware updated — reads JWT from `Authorization` header OR `token` cookie
+- [x] Admin API login restricted to superusers only (403 for non-superusers)
+- [x] Storage web UI (React + Vite + shadcn/ui + Tailwind): login, file browser (grid/list), folder navigation, breadcrumbs, create/rename/delete dialogs, TUS upload with drag-and-drop + progress, file preview (images, video, audio, PDF, code, text, markdown), folder caching
+- [x] Admin UI scaffolding (React + Vite + shadcn/ui + Tailwind)
+- [x] OpenAPI specs updated for storage-api and admin-api auth
+- [x] Docker Compose healthcheck fix
+- [ ] Tiering engine: SSD/HDD migration logic, on-access promotion
+- [ ] Tiering cron job
+- [ ] Shareable public links
 
 ### Future Phases
 - Phase 3: Admin panel (stats, user mgmt, DB tools)

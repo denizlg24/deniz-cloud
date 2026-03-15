@@ -19,7 +19,7 @@ services:
     mem_limit: 200m
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-denizcloud}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -87,3 +87,60 @@ services:
         condition: service_healthy
     mem_limit: 80m
     restart: unless-stopped
+
+  storage:
+    build:
+      context: .
+      dockerfile: packages/storage-api/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-denizcloud}
+      JWT_SECRET: ${JWT_SECRET}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
+      SSD_STORAGE_PATH: /data/ssd
+      HDD_STORAGE_PATH: /data/hdd
+      TEMP_UPLOAD_PATH: /tmp/uploads
+      SSD_WATERMARK_PERCENT: ${SSD_WATERMARK_PERCENT:-90}
+    volumes:
+      - ${SSD_STORAGE_PATH:-./data/storage/ssd}:/data/ssd
+      - ${HDD_STORAGE_PATH:-./data/storage/hdd}:/data/hdd
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 300m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:3001/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  admin:
+    build:
+      context: .
+      dockerfile: packages/admin-api/Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-denizcloud}
+      JWT_SECRET: ${JWT_SECRET}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
+      MEILI_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    mem_limit: 250m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:3002/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

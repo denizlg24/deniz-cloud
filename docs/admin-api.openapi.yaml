@@ -11,7 +11,9 @@ info:
 
     ## Authentication
 
-    All endpoints under `/api/search/*` require authentication **and** the `superuser` role.
+    **Only superusers can login to this API.** Non-superuser login attempts are rejected with `403 FORBIDDEN`.
+
+    All endpoints under `/api/search/*` additionally require the `superuser` role via middleware.
     Auth endpoints are selectively protected (login is public; me/logout require auth).
 
     Two authentication methods are supported:
@@ -81,14 +83,16 @@ paths:
       operationId: login
       summary: Login with password
       description: |
-        Authenticates a user with username and password. If the user has TOTP enabled,
+        Authenticates a superuser with username and password. Non-superuser accounts
+        are rejected with `403 FORBIDDEN`. If the user has TOTP enabled,
         a TOTP code or recovery code must also be provided.
 
         **Flow:**
         1. Validate username + password
-        2. If TOTP is enabled and no code provided, return `401 TOTP_REQUIRED`
-        3. If TOTP code or recovery code is provided, verify it
-        4. Create a session (24h expiry) and return the JWT token
+        2. Reject if user is not a superuser (`403 FORBIDDEN`)
+        3. If TOTP is enabled and no code provided, return `401 TOTP_REQUIRED`
+        4. If TOTP code or recovery code is provided, verify it
+        5. Create a session (24h expiry) and return the JWT token
       tags: [Auth]
       requestBody:
         required: true
@@ -152,6 +156,16 @@ paths:
                     error:
                       code: TOTP_NOT_CONFIGURED
                       message: TOTP not configured
+        "403":
+          description: Non-superuser account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: FORBIDDEN
+                  message: Admin access requires superuser role
         "401":
           description: Authentication failed
           content:

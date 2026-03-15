@@ -1,3 +1,4 @@
+import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { Database } from "../db";
 import type { UserRole } from "../db/schema";
@@ -9,9 +10,19 @@ export type AuthVariables = {
   sessionId: string | undefined;
 };
 
-export function auth(db: Database, jwtSecret: string) {
+export function auth(db: Database, jwtSecret: string, cookieName?: string) {
   return createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
     try {
+      if (cookieName) {
+        const cookieToken = getCookie(c, cookieName);
+        if (cookieToken) {
+          const result = await validateSession(db, cookieToken, jwtSecret);
+          c.set("user", result.user);
+          c.set("sessionId", result.sessionId);
+          return next();
+        }
+      }
+
       const bearer = c.req.header("Authorization");
       if (bearer?.startsWith("Bearer ")) {
         const token = bearer.slice(7);

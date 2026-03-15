@@ -1,4 +1,5 @@
 import { rename } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { Database } from "@deniz-cloud/shared/db";
 import { files, folders } from "@deniz-cloud/shared/db";
 import type { AuthVariables } from "@deniz-cloud/shared/middleware";
@@ -377,7 +378,7 @@ export function folderRoutes({
     const oldDiskPath = resolveSsdDiskPath(ssdStoragePath, oldPath);
     const newDiskPath = resolveSsdDiskPath(ssdStoragePath, newPath);
 
-    await ensureDir(parentPath(newDiskPath));
+    await ensureDir(dirname(newDiskPath));
     await rename(oldDiskPath, newDiskPath);
 
     const oldSsdPrefix = resolveSsdDiskPath(ssdStoragePath, oldPath);

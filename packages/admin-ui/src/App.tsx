@@ -1,3 +1,5 @@
-export function App() {
-  return <h1>Deniz Cloud — Admin</h1>;
+function App() {
+  return <section id="center"></section>;
 }
+
+export default App;

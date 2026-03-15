@@ -563,12 +563,27 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 
 ### Phase 2: Storage Service
 
-- [ ] Build storage API (Hono): upload, download, delete, rename, move, folder CRUD
-- [ ] Implement file metadata in Postgres via Drizzle
+- [x] Build storage API (Hono): upload (TUS resumable), download, delete, rename, move, folder CRUD
+- [x] Implement file metadata in Postgres via Drizzle
+- [x] Storage API auth routes — login (password+TOTP), logout, me (cookie-based sessions)
+- [x] Storage API seed CLI (`bun run seed:storage`)
+- [x] Shared cookie middleware — `setCookieToken()` / `clearCookieToken()` for SPA auth via httpOnly cookies
+- [x] Shared auth middleware updated — reads JWT from `Authorization` header OR `token` cookie
+- [x] Admin API auth — restricted login to superusers only (403 for non-superusers)
+- [x] Build storage web UI (React + Vite SPA with shadcn/ui + Tailwind):
+  - [x] Login page with TOTP support
+  - [x] File browser with grid/list view, sorting (name/date/size)
+  - [x] Folder breadcrumb navigation + sidebar root switching (personal/shared)
+  - [x] Create folder, rename, delete dialogs
+  - [x] TUS resumable upload with drag-and-drop zone + progress tracking
+  - [x] File preview panel (images, video, audio, PDF, code, text, markdown)
+  - [x] Folder content caching with invalidation
+- [x] Build admin UI scaffolding (React + Vite SPA with shadcn/ui + Tailwind)
+- [x] OpenAPI specs updated for both storage-api and admin-api auth routes
+- [x] Docker Compose healthcheck fix (pg_isready now checks correct database)
 - [ ] Build tiering engine: SSD/HDD migration logic, on-access promotion
 - [ ] Set up tiering cron job
-- [ ] Build storage web UI: file browser, upload, folder navigation
-- [ ] Add file previews (images, PDFs, video streaming, code)
+- [ ] Add file previews: PDF rendering, code syntax highlighting
 - [ ] Implement shareable public links
 
 ### Phase 3: Admin Panel

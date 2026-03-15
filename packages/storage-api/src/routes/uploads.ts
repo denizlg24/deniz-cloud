@@ -1,4 +1,5 @@
 import { open, rename } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { Database, StorageTier } from "@deniz-cloud/shared/db";
 import { files, folders, tusUploads } from "@deniz-cloud/shared/db";
 import type { AuthVariables } from "@deniz-cloud/shared/middleware";
@@ -166,7 +167,7 @@ export function uploadRoutes({
     }
 
     const uploadId = crypto.randomUUID();
-    const tempPath = `${tempUploadPath}/${uploadId}.part`;
+    const tempPath = join(tempUploadPath, `${uploadId}.part`);
     const expiresAt = new Date(Date.now() + UPLOAD_EXPIRY_HOURS * 60 * 60 * 1000);
 
     await Bun.write(tempPath, new Uint8Array(0));
@@ -398,7 +399,7 @@ async function finalizeUpload(
 
   if (tier === "ssd") {
     finalDiskPath = resolveSsdDiskPath(config.ssdStoragePath, upload.targetPath);
-    await ensureDir(parentPath(finalDiskPath));
+    await ensureDir(dirname(finalDiskPath));
   } else {
     finalDiskPath = resolveHddDiskPath(config.hddStoragePath, fileId);
     await ensureDir(config.hddStoragePath);

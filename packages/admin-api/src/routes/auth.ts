@@ -1,6 +1,7 @@
 import type { Database } from "@deniz-cloud/shared/db";
-import { type AuthVariables, auth } from "@deniz-cloud/shared/middleware";
+import { type AuthVariables, auth, sessionCookieOptions } from "@deniz-cloud/shared/middleware";
 import {
+  AuthError,
   createSession,
   loginWithPassword,
   revokeSession,
@@ -8,16 +9,19 @@ import {
   verifyTotp,
 } from "@deniz-cloud/shared/services";
 import { Hono } from "hono";
+import { deleteCookie, setCookie } from "hono/cookie";
 
 interface AuthRouteDeps {
   db: Database;
   jwtSecret: string;
   totpEncryptionKey: string;
+  cookieName: string;
 }
 
-export function authRoutes({ db, jwtSecret, totpEncryptionKey }: AuthRouteDeps) {
+export function authRoutes({ db, jwtSecret, totpEncryptionKey, cookieName }: AuthRouteDeps) {
   const app = new Hono<{ Variables: AuthVariables }>();
-  const authMw = auth(db, jwtSecret);
+  const authMw = auth(db, jwtSecret, cookieName);
+  const { name: _name, ...cookieOptions } = sessionCookieOptions(cookieName);
 
   app.post("/login", async (c) => {
     const body = await c.req.json();
@@ -33,6 +37,10 @@ export function authRoutes({ db, jwtSecret, totpEncryptionKey }: AuthRouteDeps) 
       username: body.username,
       password: body.password,
     });
+
+    if (user.role !== "superuser") {
+      throw new AuthError("Admin access requires superuser role", "FORBIDDEN", 403);
+    }
 
     if (requiresTotp) {
       if (typeof body.totpCode === "string") {
@@ -54,10 +62,10 @@ export function authRoutes({ db, jwtSecret, totpEncryptionKey }: AuthRouteDeps) 
     }
 
     const session = await createSession(db, user.id, user.role, jwtSecret);
+    setCookie(c, cookieName, session.token, cookieOptions);
 
     return c.json({
       data: {
-        token: session.token,
         expiresAt: session.expiresAt.toISOString(),
         user,
       },
@@ -76,6 +84,7 @@ export function authRoutes({ db, jwtSecret, totpEncryptionKey }: AuthRouteDeps) 
     if (sessionId) {
       await revokeSession(db, sessionId);
     }
+    deleteCookie(c, cookieName, { path: "/api" });
     return c.json({ data: { success: true } });
   });
 

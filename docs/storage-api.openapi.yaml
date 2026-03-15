@@ -12,10 +12,11 @@ info:
     ## Authentication
 
     All endpoints under `/api/uploads/*`, `/api/folders/*`, and `/api/files/*` require authentication.
+    Auth endpoints (`/api/auth/me`, `/api/auth/logout`) also require authentication; login is public.
 
     Two authentication methods are supported:
 
-    - **Bearer Token (JWT):** Obtained via the admin API `POST /api/auth/login`. Pass as `Authorization: Bearer <token>`.
+    - **Bearer Token (JWT):** Obtained via `POST /api/auth/login`. Pass as `Authorization: Bearer <token>`.
     - **API Key:** Pass as `X-API-Key: <key>` header.
 
     ## Access Control
@@ -60,6 +61,8 @@ servers:
 tags:
   - name: Health
     description: Service health checks
+  - name: Auth
+    description: Authentication, sessions, and user info
   - name: Uploads
     description: TUS v1.0.0 resumable file uploads
   - name: Folders
@@ -93,6 +96,174 @@ paths:
                     const: ok
               example:
                 status: ok
+
+  # ──────────────────────────────────────────────
+  # Auth
+  # ──────────────────────────────────────────────
+
+  /api/auth/login:
+    post:
+      operationId: login
+      summary: Login with password
+      description: |
+        Authenticates a user with username and password. If the user has TOTP enabled,
+        a TOTP code or recovery code must also be provided.
+
+        **Flow:**
+        1. Validate username + password
+        2. If TOTP is enabled and no code provided, return `401 TOTP_REQUIRED`
+        3. If TOTP code or recovery code is provided, verify it
+        4. Create a session (24h expiry) and return the JWT token
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              passwordOnly:
+                summary: Login without 2FA
+                value:
+                  username: admin
+                  password: my-secure-password-123
+              withTotp:
+                summary: Login with TOTP code
+                value:
+                  username: admin
+                  password: my-secure-password-123
+                  totpCode: "123456"
+              withRecovery:
+                summary: Login with recovery code
+                value:
+                  username: admin
+                  password: my-secure-password-123
+                  recoveryCode: "A1B2-C3D4"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_LoginData"
+              example:
+                data:
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  expiresAt: "2026-03-14T12:00:00.000Z"
+                  user:
+                    id: 550e8400-e29b-41d4-a716-446655440000
+                    username: admin
+                    email: admin@example.com
+                    role: superuser
+                    totpEnabled: true
+                    createdAt: "2026-01-01T00:00:00.000Z"
+                    updatedAt: "2026-01-01T00:00:00.000Z"
+        "400":
+          description: Invalid input or TOTP not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingFields:
+                  summary: Missing username or password
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: Username and password are required
+                totpNotConfigured:
+                  summary: TOTP not set up for this user
+                  value:
+                    error:
+                      code: TOTP_NOT_CONFIGURED
+                      message: TOTP not configured
+        "401":
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/TotpRequiredResponse"
+              examples:
+                invalidCredentials:
+                  summary: Wrong username or password
+                  value:
+                    error:
+                      code: INVALID_CREDENTIALS
+                      message: Invalid credentials
+                totpRequired:
+                  summary: TOTP code needed
+                  value:
+                    error:
+                      code: TOTP_REQUIRED
+                      message: Two-factor authentication required
+                    requiresRecoveryCode: true
+                invalidTotp:
+                  summary: Wrong TOTP code
+                  value:
+                    error:
+                      code: INVALID_TOTP
+                      message: Invalid TOTP token
+                invalidRecovery:
+                  summary: Wrong recovery code
+                  value:
+                    error:
+                      code: INVALID_RECOVERY_CODE
+                      message: Invalid recovery code
+
+  /api/auth/me:
+    get:
+      operationId: getCurrentUser
+      summary: Get current user
+      description: Returns the authenticated user's profile. Requires a valid session token or API key.
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_SafeUser"
+              example:
+                data:
+                  id: 550e8400-e29b-41d4-a716-446655440000
+                  username: admin
+                  email: admin@example.com
+                  role: superuser
+                  totpEnabled: true
+                  createdAt: "2026-01-01T00:00:00.000Z"
+                  updatedAt: "2026-01-01T00:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/logout:
+    post:
+      operationId: logout
+      summary: Logout / revoke session
+      description: |
+        Revokes the current session. If authenticated via Bearer token, the session
+        is deleted from the database. If authenticated via API key, no session is revoked
+        (API keys are not session-based).
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_Success"
+              example:
+                data:
+                  success: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ──────────────────────────────────────────────
   # Uploads (TUS protocol)
@@ -1256,7 +1427,7 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        Session JWT obtained via `POST /api/auth/login` on the admin API.
+        Session JWT obtained via `POST /api/auth/login`.
         Tokens expire after 24 hours by default.
     ApiKeyAuth:
       type: apiKey
@@ -1394,6 +1565,93 @@ components:
 
 
   schemas:
+    # --- Auth Schemas ---
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          description: User's username
+        password:
+          type: string
+          description: User's password
+        totpCode:
+          type: string
+          description: 6-digit TOTP code from authenticator app
+          pattern: ^\d{6}$
+        recoveryCode:
+          type: string
+          description: Recovery code (format XXXX-XXXX, hex uppercase)
+          pattern: ^[A-F0-9]{4}-[A-F0-9]{4}$
+
+    SafeUser:
+      type: object
+      required: [id, username, role, totpEnabled, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: User UUID
+        username:
+          type: string
+          maxLength: 255
+          description: Unique username
+        email:
+          type: ["string", "null"]
+          format: email
+          maxLength: 255
+          description: User email (optional)
+        role:
+          type: string
+          enum: [superuser, user]
+          description: User role
+        totpEnabled:
+          type: boolean
+          description: Whether TOTP 2FA is enabled
+        createdAt:
+          type: string
+          format: date-time
+          description: Account creation timestamp
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last profile update timestamp
+
+    LoginData:
+      type: object
+      required: [token, expiresAt, user]
+      properties:
+        token:
+          type: string
+          description: JWT session token (HS256)
+        expiresAt:
+          type: string
+          format: date-time
+          description: Token expiration timestamp (default 24h from login)
+        user:
+          $ref: "#/components/schemas/SafeUser"
+
+    TotpRequiredResponse:
+      type: object
+      required: [error, requiresRecoveryCode]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              const: TOTP_REQUIRED
+            message:
+              type: string
+              const: Two-factor authentication required
+        requiresRecoveryCode:
+          type: boolean
+          description: |
+            `true` if the user is a superuser (recovery codes are available as fallback).
+
     # --- Request Schemas ---
 
     CreateFolderRequest:
@@ -1613,6 +1871,32 @@ components:
           description: Total number of pages
 
     # --- Wrapped Response Types ---
+
+    ApiResponse_LoginData:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/LoginData"
+
+    ApiResponse_SafeUser:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/SafeUser"
+
+    ApiResponse_Success:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [success]
+          properties:
+            success:
+              type: boolean
+              const: true
 
     ApiResponse_RootFolders:
       type: object
