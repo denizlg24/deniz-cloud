@@ -7,29 +7,164 @@ on:
     branches: [main]
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      shared: ${{ steps.filter.outputs.shared }}
+      storage-api: ${{ steps.filter.outputs.storage-api }}
+      storage-ui: ${{ steps.filter.outputs.storage-ui }}
+      admin-api: ${{ steps.filter.outputs.admin-api }}
+      admin-ui: ${{ steps.filter.outputs.admin-ui }}
+      packages: ${{ steps.filter.outputs.packages }}
+      config: ${{ steps.filter.outputs.config }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            shared:
+              - 'packages/shared/**'
+            storage-api:
+              - 'packages/storage-api/**'
+            storage-ui:
+              - 'packages/storage-ui/**'
+            admin-api:
+              - 'packages/admin-api/**'
+            admin-ui:
+              - 'packages/admin-ui/**'
+            packages:
+              - 'packages/**'
+            config:
+              - 'package.json'
+              - 'bun.lock'
+              - 'tsconfig.json'
+              - 'biome.json'
+
   lint:
     name: Lint
+    needs: changes
+    if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.config == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run lint
 
   typecheck:
     name: Typecheck
+    needs: changes
+    if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.config == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
 
   test:
     name: Test
+    needs: changes
+    if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.config == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run test
+
+  build-storage-ui:
+    name: Build Storage UI
+    needs: changes
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.storage-ui == 'true' || needs.changes.outputs.config == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter @deniz-cloud/storage-ui build
+
+  build-storage-api:
+    name: Build Storage API
+    needs: changes
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.storage-api == 'true' || needs.changes.outputs.config == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter @deniz-cloud/storage-api build
+
+  build-admin-ui:
+    name: Build Admin UI
+    needs: changes
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.admin-ui == 'true' || needs.changes.outputs.config == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter @deniz-cloud/admin-ui build
+
+  build-admin-api:
+    name: Build Admin API
+    needs: changes
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.admin-api == 'true' || needs.changes.outputs.config == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter @deniz-cloud/admin-api build
+
+  ci:
+    name: CI
+    if: always()
+    needs: [lint, typecheck, test, build-storage-ui, build-storage-api, build-admin-ui, build-admin-api]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
