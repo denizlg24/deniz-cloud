@@ -99,12 +99,26 @@ async function getDiskUsage(): Promise<
 
   const { execSync } = await import("node:child_process");
   try {
-    const output = execSync("df -B1 --output=target,size,used,avail 2>/dev/null || df -k", {
-      encoding: "utf-8",
-      timeout: 5000,
-    });
+    let output: string;
+    let multiplier = 1;
+
+    try {
+      // GNU coreutils: output in bytes with source device
+      output = execSync("df -B1 --output=source,size,used,avail", {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+    } catch {
+      // BusyBox (Alpine): output in 1K blocks
+      output = execSync("df -kP", {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+      multiplier = 1024;
+    }
 
     const lines = output.trim().split("\n").slice(1);
+    const seen = new Set<string>();
     const disks: Array<{
       mount: string;
       totalBytes: number;
@@ -117,17 +131,18 @@ async function getDiskUsage(): Promise<
       const parts = line.trim().split(/\s+/);
       if (parts.length < 4 || !parts[0] || !parts[1] || !parts[2] || !parts[3]) continue;
 
-      const mount = parts[0];
-      // Filter to physical mounts only
-      if (!mount.startsWith("/dev/") && !mount.startsWith("/host/")) continue;
+      const source = parts[0];
+      if (!source.startsWith("/dev/")) continue;
+      if (seen.has(source)) continue;
+      seen.add(source);
 
-      const totalBytes = parseInt(parts[1], 10);
-      const usedBytes = parseInt(parts[2], 10);
-      const availableBytes = parseInt(parts[3], 10);
+      const totalBytes = parseInt(parts[1], 10) * multiplier;
+      const usedBytes = parseInt(parts[2], 10) * multiplier;
+      const availableBytes = parseInt(parts[3], 10) * multiplier;
       const usagePercent =
         totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100 * 10) / 10 : 0;
 
-      disks.push({ mount, totalBytes, usedBytes, availableBytes, usagePercent });
+      disks.push({ mount: source, totalBytes, usedBytes, availableBytes, usagePercent });
     }
 
     return disks;
