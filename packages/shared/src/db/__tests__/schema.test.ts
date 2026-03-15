@@ -4,10 +4,11 @@ import {
   apiKeys,
   files,
   folders,
+  projectCollections,
   recoveryCodes,
-  searchProjects,
   sessions,
   storageTierEnum,
+  syncStatusEnum,
   totpSecrets,
   tusUploads,
   uploadStatusEnum,
@@ -97,14 +98,27 @@ describe("apiKeys table", () => {
   });
 });
 
-describe("searchProjects table", () => {
-  it("has Meilisearch integration columns", () => {
-    const columns = Object.keys(searchProjects);
+describe("syncStatusEnum", () => {
+  it("has idle, syncing, and error values", () => {
+    expect(syncStatusEnum.enumValues).toEqual(["idle", "syncing", "error"]);
+  });
+});
+
+describe("projectCollections table", () => {
+  it("has sync and Meilisearch integration columns", () => {
+    const columns = Object.keys(projectCollections);
+    expect(columns).toContain("projectId");
     expect(columns).toContain("name");
-    expect(columns).toContain("description");
-    expect(columns).toContain("ownerId");
-    expect(columns).toContain("meiliApiKeyUid");
-    expect(columns).toContain("meiliApiKey");
+    expect(columns).toContain("mongoDatabase");
+    expect(columns).toContain("mongoCollection");
+    expect(columns).toContain("meiliIndexUid");
+    expect(columns).toContain("fieldMapping");
+    expect(columns).toContain("syncEnabled");
+    expect(columns).toContain("syncStatus");
+    expect(columns).toContain("resumeToken");
+    expect(columns).toContain("lastSyncedAt");
+    expect(columns).toContain("lastError");
+    expect(columns).toContain("documentCount");
   });
 });
 

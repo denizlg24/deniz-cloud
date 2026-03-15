@@ -6,6 +6,7 @@ export {
   createSession,
   deleteUser,
   generateAndStoreRecoveryCodes,
+  listApiKeys,
   listUsers,
   loginWithPassword,
   registerUser,
@@ -19,3 +20,20 @@ export {
   verifyAndEnableTotp,
   verifyTotp,
 } from "./auth";
+export {
+  createCollection,
+  deleteCollection,
+  getCollection,
+  listCollections,
+  listEnabledCollections,
+  updateCollection,
+  updateSyncStatus,
+} from "./collections";
+export {
+  createProject,
+  deleteProject,
+  getProject,
+  getProjectBySlug,
+  listProjects,
+  updateProject,
+} from "./projects";

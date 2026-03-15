@@ -17,4 +17,6 @@ logs/*
 # Envoy - Config
 !.envoy/config.json
 
+config
+
 

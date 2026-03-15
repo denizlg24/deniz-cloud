@@ -7,4 +7,5 @@ export const config = {
   totpEncryptionKey: requiredEnv("TOTP_ENCRYPTION_KEY"),
   meiliUrl: requiredEnv("MEILI_URL"),
   meiliMasterKey: requiredEnv("MEILI_MASTER_KEY"),
+  mongodbUri: requiredEnv("MONGODB_URI"),
 };

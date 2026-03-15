@@ -8,7 +8,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-denizcloud}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data # temporary data directory for development
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./scripts/infra/postgres-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     command: >
       postgres
       -c shared_buffers=64MB
@@ -31,16 +32,61 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_SYNC_USER: ${MONGO_SYNC_USER:-sync_reader}
+      MONGO_SYNC_PASSWORD: ${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
     volumes:
-      - ./data/mongo:/data/db # temporary data directory for development
-    command: mongod --wiredTigerCacheSizeGB 0.25
+      - ./data/mongo:/data/db
+      - ./config/mongo/replica-keyfile:/data/replica-keyfile:ro
+    entrypoint: ["/bin/bash", "-c", "cp /data/replica-keyfile /tmp/replica-keyfile && chmod 400 /tmp/replica-keyfile && chown 999:999 /tmp/replica-keyfile && exec docker-entrypoint.sh mongod --wiredTigerCacheSizeGB 0.25 --replSet rs0 --keyFile /tmp/replica-keyfile"]
     mem_limit: 400m
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      test: ["CMD", "mongosh", "--eval", "try { rs.status().ok } catch(e) { db.adminCommand('ping').ok }", "--quiet"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "[mongo-init] Checking replica set..."
+        if mongosh "mongodb://$${MONGO_USER}:$${MONGO_PASS}@mongodb:27017/?authSource=admin" --eval "rs.status().ok" --quiet 2>/dev/null; then
+          echo "[mongo-init] Replica set already initialized"
+        else
+          echo "[mongo-init] Initiating replica set..."
+          mongosh "mongodb://$${MONGO_USER}:$${MONGO_PASS}@mongodb:27017/?authSource=admin&directConnection=true" --eval '
+            rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "mongodb:27017" }] });
+          '
+          echo "[mongo-init] Waiting for primary..."
+          sleep 5
+        fi
+
+        echo "[mongo-init] Ensuring sync user exists..."
+        mongosh "mongodb://$${MONGO_USER}:$${MONGO_PASS}@mongodb:27017/?authSource=admin&directConnection=true" --eval "
+          const u = db.getSiblingDB('admin').getUser('$${SYNC_USER}');
+          if (!u) {
+            db.getSiblingDB('admin').createUser({
+              user: '$${SYNC_USER}',
+              pwd: '$${SYNC_PASS}',
+              roles: [{ role: 'readAnyDatabase', db: 'admin' }]
+            });
+            print('[mongo-init] Sync user created');
+          } else {
+            print('[mongo-init] Sync user already exists');
+          }
+        "
+        echo "[mongo-init] Done"
+    environment:
+      MONGO_USER: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_PASS: ${MONGO_INITDB_ROOT_PASSWORD}
+      SYNC_USER: ${MONGO_SYNC_USER:-sync_reader}
+      SYNC_PASS: ${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
 
   meilisearch:
     image: getmeili/meilisearch:latest
@@ -52,13 +98,10 @@ services:
       MEILI_NO_ANALYTICS: "true"
     volumes:
       - ${MEILI_DATA_DIR:-./data/meilisearch}:/meili_data
-    mem_limit: 120m
+    mem_limit: 256m
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      disable: true
 
   adminer:
     image: adminer:latest
@@ -132,14 +175,17 @@ services:
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
       MEILI_URL: http://meilisearch:7700
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MONGODB_URI: mongodb://${MONGO_SYNC_USER:-sync_reader}:${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}@mongodb:27017/?authSource=admin&replicaSet=rs0
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
     depends_on:
       postgres:
         condition: service_healthy
-      meilisearch:
+      mongodb:
         condition: service_healthy
+      meilisearch:
+        condition: service_started
     mem_limit: 250m
     restart: unless-stopped
     healthcheck:

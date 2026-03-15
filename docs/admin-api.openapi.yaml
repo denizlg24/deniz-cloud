@@ -5,7 +5,8 @@ info:
   description: |
     Admin panel API for Deniz Cloud self-hosted home server.
     Provides authentication (password + TOTP 2FA), session management,
-    and Meilisearch project/collection administration.
+    project management (with API keys, Meilisearch collections, and tenant tokens),
+    user administration, and system statistics.
 
     **Base URL:** `https://cloud.denizlg24.com`
 
@@ -13,13 +14,19 @@ info:
 
     **Only superusers can login to this API.** Non-superuser login attempts are rejected with `403 FORBIDDEN`.
 
-    All endpoints under `/api/users/*`, `/api/stats/*`, and `/api/search/*` additionally require the `superuser` role via middleware.
+    All endpoints under `/api/users/*`, `/api/stats/*`, and `/api/projects/*` additionally require the `superuser` role via middleware.
     Auth endpoints are selectively protected (login is public; me/logout require auth).
 
     Two authentication methods are supported:
 
     - **Bearer Token (JWT):** Obtained via `POST /api/auth/login`. Pass as `Authorization: Bearer <token>`.
     - **API Key:** Pass as `X-API-Key: <key>` header.
+
+    ## Projects
+
+    Projects are the top-level organizational unit. Each project has a unique slug, an optional
+    storage folder, and can have API keys and Meilisearch search collections associated with it.
+    Deleting a project cascades to its storage folder, API keys, and Meilisearch indexes.
 
     ## Error Format
 
@@ -53,12 +60,14 @@ tags:
     description: User management — create, list, delete, reset MFA (superuser only)
   - name: Stats
     description: System and storage statistics (superuser only)
-  - name: Search Projects
-    description: Meilisearch project management (superuser only)
+  - name: Projects
+    description: Project CRUD — create, list, get, update, delete (superuser only)
+  - name: API Keys
+    description: Project-scoped API key management (superuser only)
   - name: Search Collections
-    description: Meilisearch collection/index management (superuser only)
+    description: Meilisearch collection/index management within a project (superuser only)
   - name: Search Tokens
-    description: Meilisearch tenant token generation (superuser only)
+    description: Meilisearch tenant token generation for a project (superuser only)
 
 paths:
   /api/health:
@@ -433,19 +442,20 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  /api/search/projects:
+  # --- Project CRUD ---
+
+  /api/projects:
     get:
       operationId: listProjects
-      summary: List search projects
+      summary: List projects
       description: |
-        Returns a paginated list of all Meilisearch search projects.
+        Returns a paginated list of all projects.
         Projects are ordered by `createdAt` descending (newest first).
 
-        **Note:** `meiliApiKey` and `meiliApiKeyUid` are never exposed in responses.
-      tags: [Search Projects]
+        **Note:** `meiliApiKey` and `meiliApiKeyUid` are internal fields and never exposed in responses.
+      tags: [Projects]
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: page
           in: query
@@ -460,7 +470,7 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
-            default: 20
+            default: 50
           description: Items per page (1-100)
       responses:
         "200":
@@ -468,20 +478,32 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedResponse_SearchProject"
+                $ref: "#/components/schemas/PaginatedResponse_Project"
               example:
                 data:
                   - id: 550e8400-e29b-41d4-a716-446655440000
-                    name: my-app
-                    description: Search indexes for my application
+                    name: My App
+                    slug: my-app
+                    description: Main application project
                     ownerId: 660e8400-e29b-41d4-a716-446655440000
+                    storageFolderId: 770e8400-e29b-41d4-a716-446655440000
                     createdAt: "2026-03-01T00:00:00.000Z"
                     updatedAt: "2026-03-01T00:00:00.000Z"
                 pagination:
                   page: 1
-                  limit: 20
+                  limit: 50
                   total: 1
                   totalPages: 1
+        "400":
+          description: Invalid pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: INVALID_INPUT
+                  message: Invalid pagination parameters
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -489,21 +511,19 @@ paths:
 
     post:
       operationId: createProject
-      summary: Create a search project
+      summary: Create a project
       description: |
-        Creates a new Meilisearch search project. This provisions a dedicated
-        Meilisearch API key scoped to the project's indexes (`{projectName}_*`).
+        Creates a new project with a unique slug. The slug is used as the namespace
+        for Meilisearch indexes and the storage folder root path.
 
-        **Name constraints:**
-        - Required, non-empty string
-        - Max 50 characters
-        - Lowercase alphanumeric with hyphens only (no underscores)
-        - Must start and end with alphanumeric character
-        - Pattern: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
-      tags: [Search Projects]
+        **Slug constraints:**
+        - Required, 3-64 characters
+        - Lowercase alphanumeric with hyphens
+        - Must start and end with an alphanumeric character
+        - Pattern: `^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`
+      tags: [Projects]
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -511,21 +531,24 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateProjectRequest"
             example:
-              name: my-app
-              description: Search indexes for my application
+              name: My App
+              slug: my-app
+              description: Main application project
       responses:
         "201":
           description: Project created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse_SearchProject"
+                $ref: "#/components/schemas/ApiResponse_Project"
               example:
                 data:
                   id: 550e8400-e29b-41d4-a716-446655440000
-                  name: my-app
-                  description: Search indexes for my application
+                  name: My App
+                  slug: my-app
+                  description: Main application project
                   ownerId: 660e8400-e29b-41d4-a716-446655440000
+                  storageFolderId: 770e8400-e29b-41d4-a716-446655440000
                   createdAt: "2026-03-01T00:00:00.000Z"
                   updatedAt: "2026-03-01T00:00:00.000Z"
         "400":
@@ -541,57 +564,88 @@ paths:
                     error:
                       code: INVALID_INPUT
                       message: Project name is required
-                nameTooLong:
-                  summary: Name exceeds 50 characters
+                slugInvalid:
+                  summary: Invalid slug format
                   value:
                     error:
                       code: INVALID_INPUT
-                      message: Project name must be 50 characters or fewer
-                nameInvalid:
-                  summary: Invalid name format
-                  value:
-                    error:
-                      code: INVALID_INPUT
-                      message: Project name must be lowercase alphanumeric with hyphens (no underscores)
+                      message: "Slug must be 3-64 characters: lowercase letters, numbers, hyphens (no leading/trailing hyphens)"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  /api/search/projects/{id}:
+  /api/projects/{id}:
     get:
       operationId: getProject
-      summary: Get project with collections
-      description: |
-        Returns a single project's metadata along with all its Meilisearch collections (indexes).
-        Collections are discovered by querying Meilisearch for indexes with the project name prefix.
-      tags: [Search Projects]
+      summary: Get a project
+      description: Returns a single project by ID.
+      tags: [Projects]
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       responses:
         "200":
-          description: Project with collections
+          description: Project details
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse_SearchProjectWithCollections"
+                $ref: "#/components/schemas/ApiResponse_Project"
               example:
                 data:
                   id: 550e8400-e29b-41d4-a716-446655440000
-                  name: my-app
-                  description: Search indexes for my application
+                  name: My App
+                  slug: my-app
+                  description: Main application project
                   ownerId: 660e8400-e29b-41d4-a716-446655440000
+                  storageFolderId: 770e8400-e29b-41d4-a716-446655440000
                   createdAt: "2026-03-01T00:00:00.000Z"
                   updatedAt: "2026-03-01T00:00:00.000Z"
-                  collections:
-                    - name: products
-                      uid: my-app_products
-                      primaryKey: id
-                      createdAt: "2026-03-01T00:00:00.000Z"
-                      updatedAt: "2026-03-01T00:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+    patch:
+      operationId: updateProject
+      summary: Update a project
+      description: |
+        Updates a project's name and/or description. At least one field must be provided.
+        The slug cannot be changed after creation.
+      tags: [Projects]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectRequest"
+            example:
+              name: My Updated App
+              description: Updated description
+      responses:
+        "200":
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_Project"
+        "400":
+          description: No valid fields provided
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: INVALID_INPUT
+                  message: No valid fields to update
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -601,14 +655,13 @@ paths:
 
     delete:
       operationId: deleteProject
-      summary: Delete a search project
+      summary: Delete a project
       description: |
-        Deletes a search project, all its Meilisearch indexes, and its Meilisearch API key.
-        This is a destructive and irreversible operation.
-      tags: [Search Projects]
+        Deletes a project and cascades to its storage folder, all API keys,
+        and all Meilisearch indexes and API keys. This is destructive and irreversible.
+      tags: [Projects]
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       responses:
@@ -617,10 +670,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse_DeletedId"
+                $ref: "#/components/schemas/ApiResponse_Success"
               example:
                 data:
-                  id: 550e8400-e29b-41d4-a716-446655440000
+                  success: true
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -628,19 +681,201 @@ paths:
         "404":
           $ref: "#/components/responses/ProjectNotFound"
 
-  /api/search/projects/{id}/collections:
-    post:
-      operationId: createCollection
-      summary: Create a collection (Meilisearch index)
-      description: |
-        Creates a new Meilisearch index within a project. The index UID follows the
-        pattern `{projectName}_{collectionName}`.
+  # --- API Keys (nested under project) ---
 
-        **Name constraints:** Same as project names (lowercase alphanumeric + hyphens, 1-50 chars).
+  /api/projects/{id}/api-keys:
+    get:
+      operationId: listApiKeys
+      summary: List API keys for a project
+      description: |
+        Returns all API keys for a project. The `keyHash` field is excluded from responses
+        for security. Only the `keyPrefix` is shown to help identify keys.
+      tags: [API Keys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: List of API keys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_SafeApiKeyList"
+              example:
+                data:
+                  - id: 880e8400-e29b-41d4-a716-446655440000
+                    userId: 660e8400-e29b-41d4-a716-446655440000
+                    projectId: 550e8400-e29b-41d4-a716-446655440000
+                    name: production-key
+                    keyPrefix: dc_a1b2c3
+                    scopes: ["storage:read", "storage:write"]
+                    expiresAt: "2026-06-01T00:00:00.000Z"
+                    lastUsedAt: "2026-03-14T10:30:00.000Z"
+                    createdAt: "2026-03-01T00:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+    post:
+      operationId: createApiKey
+      summary: Create an API key
+      description: |
+        Creates a new API key scoped to a project. The full key is returned **only once**
+        in this response — store it securely, as it cannot be retrieved again.
+
+        **Valid scopes:** `storage:read`, `storage:write`, `storage:delete`, `search:read`, `search:write`, `search:manage`
+
+        **Expiration options:** `30d`, `90d`, `1y`, or omit for no expiration.
+      tags: [API Keys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiKeyRequest"
+            example:
+              name: production-key
+              scopes: ["storage:read", "storage:write"]
+              expiresIn: "90d"
+      responses:
+        "201":
+          description: API key created (key shown only once)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_CreatedApiKey"
+              example:
+                data:
+                  id: 880e8400-e29b-41d4-a716-446655440000
+                  key: dc_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
+                  prefix: dc_a1b2c3
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                nameRequired:
+                  summary: Name is missing
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: API key name is required
+                scopesRequired:
+                  summary: No scopes provided
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: At least one scope is required
+                invalidScopes:
+                  summary: Invalid scope values
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: "Invalid scopes: admin:all. Valid: storage:read, storage:write, storage:delete, search:read, search:write, search:manage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+  /api/projects/{id}/api-keys/{keyId}:
+    delete:
+      operationId: revokeApiKey
+      summary: Revoke an API key
+      description: Permanently revokes an API key. The key will no longer authenticate requests.
+      tags: [API Keys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: API key UUID
+      responses:
+        "200":
+          description: API key revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_Success"
+              example:
+                data:
+                  success: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+  # --- Search Collections (nested under project) ---
+
+  /api/projects/{id}/search-collections:
+    get:
+      operationId: listSearchCollections
+      summary: List search collections for a project
+      description: |
+        Returns all Meilisearch indexes associated with a project. If the project
+        has no Meilisearch API key yet (no collections created), returns an empty array.
       tags: [Search Collections]
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: List of search collections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_SearchCollectionList"
+              example:
+                data:
+                  - name: products
+                    uid: my-app_products
+                    primaryKey: id
+                    createdAt: "2026-03-01T00:00:00.000Z"
+                    updatedAt: "2026-03-01T00:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+
+    post:
+      operationId: createSearchCollection
+      summary: Create a search collection (Meilisearch index)
+      description: |
+        Creates a new Meilisearch index within a project. The index UID follows the
+        pattern `{projectSlug}_{collectionName}`.
+
+        If this is the first collection for the project, a Meilisearch API key is
+        automatically created and stored.
+
+        **Name constraints:**
+        - Lowercase alphanumeric with hyphens
+        - Must start and end with an alphanumeric character
+        - Max 50 characters
+        - Pattern: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+      tags: [Search Collections]
+      security:
+        - BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       requestBody:
@@ -672,18 +907,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               examples:
-                nameRequired:
-                  summary: Name is missing
-                  value:
-                    error:
-                      code: INVALID_INPUT
-                      message: Collection name is required
                 nameInvalid:
                   summary: Invalid name format
                   value:
                     error:
                       code: INVALID_INPUT
-                      message: Collection name must be lowercase alphanumeric with hyphens (no underscores)
+                      message: Collection name must be lowercase alphanumeric with hyphens (no leading/trailing hyphens, max 50 chars)
+                nameTooLong:
+                  summary: Name exceeds 50 characters
+                  value:
+                    error:
+                      code: INVALID_INPUT
+                      message: Collection name must be 50 characters or fewer
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -691,17 +926,16 @@ paths:
         "404":
           $ref: "#/components/responses/ProjectNotFound"
 
-  /api/search/projects/{id}/collections/{name}:
+  /api/projects/{id}/search-collections/{name}:
     delete:
-      operationId: deleteCollection
-      summary: Delete a collection (Meilisearch index)
+      operationId: deleteSearchCollection
+      summary: Delete a search collection (Meilisearch index)
       description: |
-        Deletes a Meilisearch index within a project. The index `{projectName}_{collectionName}`
+        Deletes a Meilisearch index within a project. The index `{projectSlug}_{collectionName}`
         is permanently removed along with all its documents.
       tags: [Search Collections]
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/CollectionName"
@@ -722,22 +956,26 @@ paths:
         "404":
           $ref: "#/components/responses/ProjectNotFound"
 
-  /api/search/projects/{id}/tokens:
+  # --- Search Tokens ---
+
+  /api/projects/{id}/search-token:
     post:
-      operationId: generateToken
+      operationId: generateSearchToken
       summary: Generate a Meilisearch tenant token
       description: |
         Generates a scoped Meilisearch tenant token (JWT) for a project. The token
-        is signed with the project's API key and restricts search access to indexes
-        matching `{projectName}_*`.
+        is signed with the project's Meilisearch API key and restricts search access
+        to indexes matching `{projectSlug}_*`.
 
         Clients can use this token to query Meilisearch directly without a proxy.
+
+        **Requires** the project to have at least one search collection (so that a
+        Meilisearch API key exists). Returns `400 SEARCH_NOT_CONFIGURED` otherwise.
 
         **Token expiry:** Configurable via `expiresInHours` (default 24h, max 720h / 30 days).
       tags: [Search Tokens]
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       requestBody:
@@ -758,7 +996,17 @@ paths:
               example:
                 data:
                   token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-                  expiresAt: "2026-03-15T12:00:00.000Z"
+                  expiresAt: "2026-03-17T12:00:00.000Z"
+        "400":
+          description: Project has no search collections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: SEARCH_NOT_CONFIGURED
+                  message: Project has no search collections. Create a collection first.
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -898,19 +1146,59 @@ components:
 
     CreateProjectRequest:
       type: object
-      required: [name]
+      required: [name, slug]
       properties:
         name:
           type: string
-          minLength: 1
-          maxLength: 50
-          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+          description: Human-readable project name
+        slug:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: ^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$
           description: |
-            Project name. Lowercase alphanumeric with hyphens.
-            No underscores. Must start and end with alphanumeric.
+            Unique project slug. Lowercase alphanumeric with hyphens.
+            Must start and end with an alphanumeric character. 3-64 characters.
+            Used as the namespace for Meilisearch indexes and storage folder root.
         description:
           type: ["string","null"]
           description: Optional project description
+
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Updated project name
+        description:
+          type: string
+          description: Updated project description
+
+    CreateApiKeyRequest:
+      type: object
+      required: [name, scopes]
+      properties:
+        name:
+          type: string
+          description: Human-readable name for the API key
+        scopes:
+          type: array
+          items:
+            type: string
+            enum:
+              - storage:read
+              - storage:write
+              - storage:delete
+              - search:read
+              - search:write
+              - search:manage
+          minItems: 1
+          description: |
+            Permissions granted to this key. At least one scope is required.
+        expiresIn:
+          type: string
+          enum: ["30d", "90d", "1y"]
+          description: Optional expiration duration. Omit for no expiration.
 
     CreateCollectionRequest:
       type: object
@@ -922,8 +1210,8 @@ components:
           maxLength: 50
           pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
           description: |
-            Collection name. Same constraints as project names.
-            The Meilisearch index UID will be `{projectName}_{collectionName}`.
+            Collection name. Lowercase alphanumeric with hyphens.
+            The Meilisearch index UID will be `{projectSlug}_{collectionName}`.
         primaryKey:
           type: string
           default: id
@@ -938,6 +1226,19 @@ components:
           maximum: 720
           default: 24
           description: Token validity in hours (max 720 = 30 days). Defaults to 24.
+
+    CreateUserRequest:
+      type: object
+      required: [username]
+      properties:
+        username:
+          type: string
+          pattern: ^[a-z0-9_-]{3,50}$
+          description: Username (3-50 chars, lowercase alphanumeric, hyphens, underscores)
+        role:
+          type: string
+          enum: [user, superuser]
+          default: user
 
     # --- Response Schemas ---
 
@@ -1012,9 +1313,9 @@ components:
           format: date-time
           description: Last profile update timestamp
 
-    SearchProject:
+    Project:
       type: object
-      required: [id, name, ownerId, createdAt, updatedAt]
+      required: [id, name, slug, ownerId, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -1022,8 +1323,11 @@ components:
           description: Project UUID
         name:
           type: string
-          maxLength: 255
-          description: Unique project name
+          description: Human-readable project name
+        slug:
+          type: string
+          maxLength: 64
+          description: Unique project slug (used as namespace for search indexes and storage)
         description:
           type: ["string","null"]
           description: Optional project description
@@ -1031,6 +1335,10 @@ components:
           type: string
           format: uuid
           description: UUID of the user who created this project
+        storageFolderId:
+          type: ["string","null"]
+          format: uuid
+          description: UUID of the project's root storage folder (null if not yet created)
         createdAt:
           type: string
           format: date-time
@@ -1038,8 +1346,57 @@ components:
           type: string
           format: date-time
       description: |
-        A search project. Note: `meiliApiKey` and `meiliApiKeyUid`
+        A project. Note: `meiliApiKey` and `meiliApiKeyUid`
         are internal fields and never exposed in API responses.
+
+    SafeApiKey:
+      type: object
+      required: [id, userId, projectId, name, keyPrefix, scopes, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: API key UUID
+        userId:
+          type: string
+          format: uuid
+          description: UUID of the user who created this key
+        projectId:
+          type: string
+          format: uuid
+          description: UUID of the project this key belongs to
+        name:
+          type: string
+          description: Human-readable key name
+        keyPrefix:
+          type: string
+          description: First characters of the key for identification
+        scopes:
+          type: array
+          items:
+            type: string
+            enum:
+              - storage:read
+              - storage:write
+              - storage:delete
+              - search:read
+              - search:write
+              - search:manage
+          description: Permissions granted to this key
+        expiresAt:
+          type: ["string","null"]
+          format: date-time
+          description: Expiration timestamp (null if no expiration)
+        lastUsedAt:
+          type: ["string","null"]
+          format: date-time
+          description: Last time this key was used for authentication
+        createdAt:
+          type: string
+          format: date-time
+          description: Key creation timestamp
+      description: |
+        An API key with the `keyHash` field excluded for security.
 
     SearchCollection:
       type: object
@@ -1050,7 +1407,7 @@ components:
           description: Collection name (parsed from index UID)
         uid:
           type: string
-          description: Full Meilisearch index UID (`{projectName}_{collectionName}`)
+          description: Full Meilisearch index UID (`{projectSlug}_{collectionName}`)
         primaryKey:
           type: ["string","null"]
           description: Primary key field configured on the index
@@ -1060,17 +1417,6 @@ components:
         updatedAt:
           type: string
           format: date-time
-
-    SearchProjectWithCollections:
-      allOf:
-        - $ref: "#/components/schemas/SearchProject"
-        - type: object
-          required: [collections]
-          properties:
-            collections:
-              type: array
-              items:
-                $ref: "#/components/schemas/SearchCollection"
 
     LoginData:
       type: object
@@ -1114,109 +1460,6 @@ components:
           type: string
           format: date-time
           description: Token expiration timestamp
-
-    # --- Wrapped Response Types ---
-
-    ApiResponse_LoginData:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/LoginData"
-
-    ApiResponse_SafeUser:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/SafeUser"
-
-    ApiResponse_Success:
-      type: object
-      required: [data]
-      properties:
-        data:
-          type: object
-          required: [success]
-          properties:
-            success:
-              type: boolean
-              const: true
-
-    ApiResponse_SearchProject:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/SearchProject"
-
-    ApiResponse_SearchProjectWithCollections:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/SearchProjectWithCollections"
-
-    ApiResponse_DeletedId:
-      type: object
-      required: [data]
-      properties:
-        data:
-          type: object
-          required: [id]
-          properties:
-            id:
-              type: string
-              format: uuid
-
-    ApiResponse_DeletedName:
-      type: object
-      required: [data]
-      properties:
-        data:
-          type: object
-          required: [name]
-          properties:
-            name:
-              type: string
-
-    ApiResponse_CreatedCollection:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/CreatedCollection"
-
-    ApiResponse_TenantToken:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/TenantToken"
-
-    PaginatedResponse_SearchProject:
-      type: object
-      required: [data, pagination]
-      properties:
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/SearchProject"
-        pagination:
-          $ref: "#/components/schemas/Pagination"
-
-    CreateUserRequest:
-      type: object
-      required: [username]
-      properties:
-        username:
-          type: string
-          pattern: ^[a-z0-9_-]{3,50}$
-          description: Username (3-50 chars, lowercase alphanumeric, hyphens, underscores)
-        role:
-          type: string
-          enum: [user, superuser]
-          default: user
 
     SystemStats:
       type: object
@@ -1286,6 +1529,103 @@ components:
           type: string
           format: date-time
 
+    # --- Wrapped Response Types ---
+
+    ApiResponse_LoginData:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/LoginData"
+
+    ApiResponse_SafeUser:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/SafeUser"
+
+    ApiResponse_Success:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [success]
+          properties:
+            success:
+              type: boolean
+              const: true
+
+    ApiResponse_Project:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/Project"
+
+    ApiResponse_SafeApiKeyList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SafeApiKey"
+
+    ApiResponse_CreatedApiKey:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, key, prefix]
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: API key UUID
+            key:
+              type: string
+              description: Full API key (shown only once)
+            prefix:
+              type: string
+              description: Key prefix for identification
+
+    ApiResponse_SearchCollectionList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchCollection"
+
+    ApiResponse_DeletedName:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+
+    ApiResponse_CreatedCollection:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/CreatedCollection"
+
+    ApiResponse_TenantToken:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantToken"
+
     ApiResponse_SystemStats:
       type: object
       required: [data]
@@ -1299,6 +1639,17 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/StorageStats"
+
+    PaginatedResponse_Project:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
 
     PaginatedResponse_SafeUser:
       type: object

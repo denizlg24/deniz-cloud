@@ -50,7 +50,6 @@ export function DeleteDialog({ target, onClose }: DeleteDialogProps) {
       } else {
         await deleteFile(target.id);
       }
-      invalidateFolder(target.parentFolderId);
       toast.success(`Deleted "${target.name}"`);
     } catch (err) {
       invalidateFolder(target.parentFolderId);

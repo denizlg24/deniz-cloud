@@ -100,6 +100,15 @@ export function isSharedPath(path: string): boolean {
   return path === SHARED_ROOT_PATH || path.startsWith(`${SHARED_ROOT_PATH}/`);
 }
 
+export function buildProjectRootPath(slug: string): string {
+  return `/${slug}`;
+}
+
+export function isProjectPath(path: string, projectSlug: string): boolean {
+  const root = buildProjectRootPath(projectSlug);
+  return path === root || path.startsWith(`${root}/`);
+}
+
 export class PathValidationError extends Error {
   constructor(message: string) {
     super(message);

@@ -19,7 +19,7 @@ import {
   type UserRole,
   users,
 } from "../db/schema";
-import type { SafeUser } from "../types";
+import type { ApiKeyScope, SafeApiKey, SafeProject, SafeUser } from "../types";
 
 type AuthErrorStatus = 400 | 401 | 403 | 404;
 
@@ -390,8 +390,13 @@ export async function revokeSession(db: Database, sessionId: string): Promise<vo
 
 export async function createApiKey(
   db: Database,
-  userId: string,
-  name: string,
+  input: {
+    userId: string;
+    projectId: string;
+    name: string;
+    scopes: ApiKeyScope[];
+    expiresAt?: Date;
+  },
 ): Promise<{ id: string; key: string; prefix: string }> {
   const keyBytes = randomBytes(32);
   const key = keyBytes.toString("base64url");
@@ -400,19 +405,30 @@ export async function createApiKey(
 
   const [record] = await db
     .insert(apiKeys)
-    .values({ userId, name, keyHash, keyPrefix: prefix })
+    .values({
+      userId: input.userId,
+      projectId: input.projectId,
+      name: input.name,
+      keyHash,
+      keyPrefix: prefix,
+      scopes: input.scopes,
+      expiresAt: input.expiresAt,
+    })
     .returning();
 
   if (!record) throw new Error("Failed to create API key");
   return { id: record.id, key, prefix };
 }
 
-export async function validateApiKey(db: Database, key: string): Promise<SafeUser> {
+export async function validateApiKey(
+  db: Database,
+  key: string,
+): Promise<{ user: SafeUser; project: SafeProject; scopes: string[] }> {
   const keyHash = createHash("sha256").update(key).digest("hex");
 
   const record = await db.query.apiKeys.findFirst({
     where: eq(apiKeys.keyHash, keyHash),
-    with: { user: true },
+    with: { user: true, project: true },
   });
 
   if (!record) throw new AuthError("Invalid API key", "INVALID_API_KEY");
@@ -422,13 +438,26 @@ export async function validateApiKey(db: Database, key: string): Promise<SafeUse
 
   await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, record.id));
 
-  return toSafeUser(record.user);
+  return {
+    user: toSafeUser(record.user),
+    project: record.project,
+    scopes: record.scopes,
+  };
 }
 
-export async function revokeApiKey(db: Database, keyId: string, userId: string): Promise<void> {
+export async function listApiKeys(db: Database, projectId: string): Promise<SafeApiKey[]> {
+  const keys = await db.query.apiKeys.findMany({
+    where: eq(apiKeys.projectId, projectId),
+    orderBy: apiKeys.createdAt,
+  });
+
+  return keys.map(({ keyHash: _, ...rest }) => rest);
+}
+
+export async function revokeApiKey(db: Database, keyId: string, projectId: string): Promise<void> {
   const [deleted] = await db
     .delete(apiKeys)
-    .where(and(eq(apiKeys.id, keyId), eq(apiKeys.userId, userId)))
+    .where(and(eq(apiKeys.id, keyId), eq(apiKeys.projectId, projectId)))
     .returning({ id: apiKeys.id });
 
   if (!deleted) {

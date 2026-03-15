@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Deniz Cloud Storage API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Cloud storage API for Deniz Cloud self-hosted home server.
     Provides file management (upload, download, rename, move, delete),
@@ -18,12 +18,36 @@ info:
     Two authentication methods are supported:
 
     - **Bearer Token (JWT):** Obtained via `POST /api/auth/login`. Pass as `Authorization: Bearer <token>`.
-    - **API Key:** Pass as `X-API-Key: <key>` header.
+    - **API Key:** Pass as `X-API-Key: <key>` header. API keys are scoped to a project and carry a set of scopes that determine which operations are permitted.
 
     ## Access Control
 
+    The storage API supports two access control models depending on the authentication method:
+
+    ### Session Auth (Bearer JWT / Cookie)
+
+    Ownership-based access control — unchanged from the original model:
+
     - **Private folders** (`/{userId}/...`): Only the owning user can read/write.
     - **Shared folders** (`/shared/...`): All authenticated users can read. Only the owner or a superuser can modify/delete.
+
+    ### API Key Auth (X-API-Key)
+
+    Project-scoped access control — the API key is bound to a project and restricted to that project's folder:
+
+    - **Project folder** (`/{projectSlug}/...`): The API key can only access resources whose path falls within the project's root folder. Any attempt to access a resource outside the project folder returns `403 ACCESS_DENIED`.
+    - **Scopes**: Each API key carries a set of scopes that determine which operations are allowed. A request that requires a scope the key does not have returns `403 INSUFFICIENT_SCOPE`.
+
+    **Available scopes:**
+
+    | Scope | Permits |
+    |-------|---------|
+    | `storage:read` | Download files, list folders/files, get file/folder details |
+    | `storage:write` | Upload files, create/rename/move folders and files |
+    | `storage:delete` | Delete files and folders |
+    | `search:read` | Read search indexes (not used by storage API) |
+    | `search:write` | Write to search indexes (not used by storage API) |
+    | `search:manage` | Manage search projects (not used by storage API) |
 
     ## Storage Tiering
 
@@ -46,6 +70,34 @@ info:
       }
     }
     ```
+
+    ## Error Code Reference
+
+    ### Authentication Errors (401)
+
+    | Code | Description |
+    |------|-------------|
+    | `UNAUTHORIZED` | No authentication provided |
+    | `TOKEN_INVALID` | JWT is invalid or expired |
+    | `SESSION_INVALID` | Session revoked or expired in DB |
+    | `INVALID_API_KEY` | API key not found |
+    | `API_KEY_EXPIRED` | API key past expiry |
+
+    ### Authorization Errors (403)
+
+    | Code | Description |
+    |------|-------------|
+    | `ACCESS_DENIED` | User does not have access to the resource. For API key auth, this also covers resources outside the project folder (message: "Resource is outside project scope") |
+    | `INSUFFICIENT_SCOPE` | API key does not have the required scope for the requested operation |
+    | `CANNOT_MODIFY_ROOT` | Cannot rename or move root folders |
+    | `CANNOT_DELETE_ROOT` | Cannot delete root folders |
+    | `INVALID_SHARE_LINK` | Share link is invalid or expired |
+
+    ### Server Errors (500)
+
+    | Code | Description |
+    |------|-------------|
+    | `PROJECT_FOLDER_MISSING` | The project's storage folder was not found in the database (API key auth only) |
   contact:
     name: Deniz Cloud
     url: https://github.com/denizlg24/deniz-cloud
@@ -485,6 +537,8 @@ paths:
         **Upload session lifetime:** 24 hours from creation. Expired sessions are cleaned up automatically.
 
         On success, the `Location` header contains the upload URL for subsequent PATCH/HEAD/DELETE requests.
+
+        **API key auth:** Requires `storage:write` scope. The target folder must be within the project's folder (`/{projectSlug}/...`).
       tags: [Uploads]
       security:
         - BearerAuth: []
@@ -582,10 +636,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error:
-                  code: ACCESS_DENIED
-                  message: You do not have access to this folder
+              examples:
+                accessDenied:
+                  summary: No access to this folder (session auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: You do not have access to this folder
+                outsideProject:
+                  summary: Target folder outside project scope (API key auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: Resource is outside project scope
+                insufficientScope:
+                  summary: API key missing storage:write scope
+                  value:
+                    error:
+                      code: INSUFFICIENT_SCOPE
+                      message: "API key requires scope: storage:write"
         "404":
           description: Target folder not found
           content:
@@ -606,6 +675,8 @@ paths:
                 error:
                   code: FILE_EXISTS
                   message: A file already exists at this path
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   /api/uploads/{id}:
     head:
@@ -617,6 +688,8 @@ paths:
 
         Returns `404` if the upload does not exist or does not belong to the authenticated user.
         Returns `410` if the upload is no longer in progress (completed, expired, or cancelled).
+
+        **API key auth:** Requires `storage:write` scope. The upload's target folder must be within the project's folder.
       tags: [Uploads]
       security:
         - BearerAuth: []
@@ -647,6 +720,8 @@ paths:
                 const: 1.0.0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ProjectScopeDenied"
         "404":
           description: Upload not found or does not belong to user
         "410":
@@ -668,6 +743,8 @@ paths:
         3. File is moved from temp to final storage location
         4. File record is created in the database
         5. Upload status is set to `completed`
+
+        **API key auth:** Requires `storage:write` scope. The upload's target folder must be within the project's folder.
       tags: [Uploads]
       security:
         - BearerAuth: []
@@ -736,6 +813,8 @@ paths:
                       message: Request body is empty
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ProjectScopeDenied"
         "404":
           description: Upload not found
           content:
@@ -795,6 +874,8 @@ paths:
                 error:
                   code: INVALID_CONTENT_TYPE
                   message: Content-Type must be application/offset+octet-stream
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
     delete:
       operationId: cancelUpload
@@ -802,6 +883,8 @@ paths:
       description: |
         Cancels an upload session and deletes the temporary file from disk.
         The upload record is permanently removed from the database.
+
+        **API key auth:** Requires `storage:delete` scope. The upload's target folder must be within the project's folder.
       tags: [Uploads]
       security:
         - BearerAuth: []
@@ -818,6 +901,8 @@ paths:
                 const: 1.0.0
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ProjectScopeDenied"
         "404":
           description: Upload not found or does not belong to user
           content:
@@ -828,6 +913,8 @@ paths:
                 error:
                   code: UPLOAD_NOT_FOUND
                   message: Upload not found
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   # ──────────────────────────────────────────────
   # Folders
@@ -838,11 +925,18 @@ paths:
       operationId: getRootFolders
       summary: Get root folders
       description: |
+        Returns the root folders available to the authenticated caller. The response shape
+        differs depending on the authentication method:
+
+        **Session auth (Bearer JWT / Cookie):**
         Returns the authenticated user's personal root folder and the shared root folder.
         Both are lazily created if they do not already exist.
 
         - **User root:** `/{userId}` — private to the user
         - **Shared root:** `/shared` — accessible to all authenticated users
+
+        **API key auth (X-API-Key):**
+        Returns the project's root folder only. The project folder path is `/{projectSlug}`.
       tags: [Folders]
       security:
         - BearerAuth: []
@@ -853,19 +947,34 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse_RootFolders"
-              example:
-                data:
-                  userRoot:
-                    id: 550e8400-e29b-41d4-a716-446655440000
-                    path: /550e8400-e29b-41d4-a716-446655440000
-                    name: 550e8400-e29b-41d4-a716-446655440000
-                  sharedRoot:
-                    id: 660e8400-e29b-41d4-a716-446655440000
-                    path: /shared
-                    name: shared
+                oneOf:
+                  - $ref: "#/components/schemas/ApiResponse_RootFolders"
+                  - $ref: "#/components/schemas/ApiResponse_ProjectRoot"
+              examples:
+                sessionAuth:
+                  summary: Session auth response (user root + shared root)
+                  value:
+                    data:
+                      userRoot:
+                        id: 550e8400-e29b-41d4-a716-446655440000
+                        path: /550e8400-e29b-41d4-a716-446655440000
+                        name: 550e8400-e29b-41d4-a716-446655440000
+                      sharedRoot:
+                        id: 660e8400-e29b-41d4-a716-446655440000
+                        path: /shared
+                        name: shared
+                apiKeyAuth:
+                  summary: API key auth response (project root only)
+                  value:
+                    data:
+                      projectRoot:
+                        id: 770e8400-e29b-41d4-a716-446655440000
+                        path: /my-project
+                        name: my-project
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   /api/folders:
     post:
@@ -878,6 +987,8 @@ paths:
         **Name normalization:**
         - Converted to snake_case
         - Invalid characters (path separators, null bytes, etc.) are rejected
+
+        **API key auth:** Requires `storage:write` scope. The parent folder must be within the project's folder (`/{projectSlug}/...`).
       tags: [Folders]
       security:
         - BearerAuth: []
@@ -933,7 +1044,30 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AccessDenied"
+          description: Access denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                accessDenied:
+                  summary: No access to parent folder (session auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: You do not have access to this folder
+                outsideProject:
+                  summary: Parent folder outside project scope (API key auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: Resource is outside project scope
+                insufficientScope:
+                  summary: API key missing storage:write scope
+                  value:
+                    error:
+                      code: INSUFFICIENT_SCOPE
+                      message: "API key requires scope: storage:write"
         "404":
           description: Parent folder not found
           content:
@@ -954,12 +1088,17 @@ paths:
                 error:
                   code: FOLDER_EXISTS
                   message: A folder already exists at this path
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   /api/folders/{id}:
     get:
       operationId: getFolder
       summary: Get folder details
-      description: Returns metadata for a single folder.
+      description: |
+        Returns metadata for a single folder.
+
+        **API key auth:** Requires `storage:read` scope. The folder must be within the project's folder (`/{projectSlug}/...`).
       tags: [Folders]
       security:
         - BearerAuth: []
@@ -985,9 +1124,11 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AccessDenied"
+          $ref: "#/components/responses/ProjectScopeDenied"
         "404":
           $ref: "#/components/responses/FolderNotFound"
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
     patch:
       operationId: updateFolder
@@ -1003,6 +1144,8 @@ paths:
         - Cannot move a folder into itself or any of its descendants (circular move)
         - Target path must not already be occupied by another folder
         - User must have access to both the folder and the target parent
+
+        **API key auth:** Requires `storage:write` scope. Both the source folder and the target parent must be within the project's folder (`/{projectSlug}/...`).
       tags: [Folders]
       security:
         - BearerAuth: []
@@ -1083,11 +1226,23 @@ paths:
                       code: CANNOT_MODIFY_ROOT
                       message: Cannot rename or move root folders
                 accessDenied:
-                  summary: Not the owner
+                  summary: Not the owner (session auth)
                   value:
                     error:
                       code: ACCESS_DENIED
                       message: You do not have access to this folder
+                outsideProject:
+                  summary: Folder outside project scope (API key auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: Resource is outside project scope
+                insufficientScope:
+                  summary: API key missing storage:write scope
+                  value:
+                    error:
+                      code: INSUFFICIENT_SCOPE
+                      message: "API key requires scope: storage:write"
         "404":
           description: Folder or target parent not found
           content:
@@ -1117,6 +1272,8 @@ paths:
                 error:
                   code: FOLDER_EXISTS
                   message: A folder already exists at the target path
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
     delete:
       operationId: deleteFolder
@@ -1126,6 +1283,8 @@ paths:
         Root folders (`/{userId}` and `/shared`) cannot be deleted.
 
         The directory is removed from disk and the database record is deleted.
+
+        **API key auth:** Requires `storage:delete` scope. The folder must be within the project's folder (`/{projectSlug}/...`).
       tags: [Folders]
       security:
         - BearerAuth: []
@@ -1158,11 +1317,23 @@ paths:
                       code: CANNOT_DELETE_ROOT
                       message: Cannot delete root folders
                 accessDenied:
-                  summary: Not the owner
+                  summary: Not the owner (session auth)
                   value:
                     error:
                       code: ACCESS_DENIED
                       message: You do not have access to this folder
+                outsideProject:
+                  summary: Folder outside project scope (API key auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: Resource is outside project scope
+                insufficientScope:
+                  summary: API key missing storage:delete scope
+                  value:
+                    error:
+                      code: INSUFFICIENT_SCOPE
+                      message: "API key requires scope: storage:delete"
         "404":
           $ref: "#/components/responses/FolderNotFound"
         "409":
@@ -1175,6 +1346,8 @@ paths:
                 error:
                   code: FOLDER_NOT_EMPTY
                   message: Folder is not empty. Delete all contents first.
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   /api/folders/{id}/contents:
     get:
@@ -1186,6 +1359,8 @@ paths:
 
         The `pagination` object applies to files only. Subfolders are always returned
         in their entirety.
+
+        **API key auth:** Requires `storage:read` scope. The folder must be within the project's folder (`/{projectSlug}/...`).
       tags: [Folders]
       security:
         - BearerAuth: []
@@ -1231,9 +1406,11 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AccessDenied"
+          $ref: "#/components/responses/ProjectScopeDenied"
         "404":
           $ref: "#/components/responses/FolderNotFound"
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   # ──────────────────────────────────────────────
   # Files
@@ -1246,6 +1423,8 @@ paths:
       description: |
         Returns a paginated list of files in the specified folder, ordered by `createdAt` descending.
         The `folderId` query parameter is required.
+
+        **API key auth:** Requires `storage:read` scope. The folder must be within the project's folder (`/{projectSlug}/...`).
       tags: [Files]
       security:
         - BearerAuth: []
@@ -1295,9 +1474,11 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AccessDenied"
+          $ref: "#/components/responses/ProjectScopeDenied"
         "404":
           $ref: "#/components/responses/FolderNotFound"
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   /api/files/{id}:
     get:
@@ -1306,6 +1487,8 @@ paths:
       description: |
         Returns full metadata for a single file, including checksum, storage tier,
         access count, and last access timestamp.
+
+        **API key auth:** Requires `storage:read` scope. The file must be within the project's folder (`/{projectSlug}/...`).
       tags: [Files]
       security:
         - BearerAuth: []
@@ -1335,9 +1518,11 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/FileAccessDenied"
+          $ref: "#/components/responses/ProjectScopeDenied"
         "404":
           $ref: "#/components/responses/FileNotFound"
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
     patch:
       operationId: updateFile
@@ -1354,6 +1539,8 @@ paths:
 
         If the resulting path is identical to the current path (no actual changes),
         the current file metadata is returned without modification.
+
+        **API key auth:** Requires `storage:write` scope. The file and the target folder (if moving) must be within the project's folder (`/{projectSlug}/...`).
       tags: [Files]
       security:
         - BearerAuth: []
@@ -1415,7 +1602,30 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/FileAccessDenied"
+          description: Access denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                accessDenied:
+                  summary: Not the owner (session auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: You do not have access to this file
+                outsideProject:
+                  summary: File outside project scope (API key auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: Resource is outside project scope
+                insufficientScope:
+                  summary: API key missing storage:write scope
+                  value:
+                    error:
+                      code: INSUFFICIENT_SCOPE
+                      message: "API key requires scope: storage:write"
         "404":
           description: File or target folder not found
           content:
@@ -1445,6 +1655,8 @@ paths:
                 error:
                   code: FILE_EXISTS
                   message: A file already exists at the target path
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
     delete:
       operationId: deleteFile
@@ -1452,6 +1664,8 @@ paths:
       description: |
         Deletes a file from disk and removes its database record.
         Only the file owner or a superuser can delete a file.
+
+        **API key auth:** Requires `storage:delete` scope. The file must be within the project's folder (`/{projectSlug}/...`).
       tags: [Files]
       security:
         - BearerAuth: []
@@ -1476,12 +1690,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error:
-                  code: ACCESS_DENIED
-                  message: You do not have permission to delete this file
+              examples:
+                accessDenied:
+                  summary: Not the owner (session auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: You do not have permission to delete this file
+                outsideProject:
+                  summary: File outside project scope (API key auth)
+                  value:
+                    error:
+                      code: ACCESS_DENIED
+                      message: Resource is outside project scope
+                insufficientScope:
+                  summary: API key missing storage:delete scope
+                  value:
+                    error:
+                      code: INSUFFICIENT_SCOPE
+                      message: "API key requires scope: storage:delete"
         "404":
           $ref: "#/components/responses/FileNotFound"
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   /api/files/{id}/download:
     get:
@@ -1496,6 +1727,8 @@ paths:
 
         Each download increments the file's `accessCount` and updates `lastAccessedAt`
         asynchronously (does not block the response).
+
+        **API key auth:** Requires `storage:read` scope. The file must be within the project's folder (`/{projectSlug}/...`).
       tags: [Files]
       security:
         - BearerAuth: []
@@ -1569,7 +1802,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/FileAccessDenied"
+          $ref: "#/components/responses/ProjectScopeDenied"
         "404":
           $ref: "#/components/responses/FileNotFound"
         "416":
@@ -1579,6 +1812,8 @@ paths:
               schema:
                 type: string
               description: "Total file size (e.g., `bytes */4096`)"
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   /api/files/{id}/share:
     post:
@@ -1591,6 +1826,8 @@ paths:
 
         Tokens are not stored in the database — they are verified by recomputing the HMAC signature.
         Tokens cannot be revoked individually; they expire naturally.
+
+        **API key auth:** Requires `storage:read` scope. The file must be within the project's folder (`/{projectSlug}/...`).
       tags: [Share]
       security:
         - BearerAuth: []
@@ -1626,9 +1863,11 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/FileAccessDenied"
+          $ref: "#/components/responses/ProjectScopeDenied"
         "404":
           $ref: "#/components/responses/FileNotFound"
+        "500":
+          $ref: "#/components/responses/ProjectFolderMissing"
 
   /api/share/{token}:
     get:
@@ -1748,6 +1987,7 @@ components:
       description: |
         Session JWT obtained via `POST /api/auth/login`.
         Tokens expire after 24 hours by default.
+        Access control is ownership-based: users can access their own folders and the shared folder.
     ApiKeyAuth:
       type: apiKey
       in: header
@@ -1755,6 +1995,18 @@ components:
       description: |
         API key for programmatic access. Created via the admin panel.
         Pass the raw key value (not hashed).
+
+        Each API key is scoped to a project and carries a set of scopes that determine
+        which operations are permitted. Access is restricted to resources within the
+        project's folder (`/{projectSlug}/...`).
+
+        **Available scopes:**
+        - `storage:read` — download files, list folders/files, get file/folder details
+        - `storage:write` — upload files, create/rename/move folders and files
+        - `storage:delete` — delete files and folders
+        - `search:read` — read search indexes (not used by storage API)
+        - `search:write` — write to search indexes (not used by storage API)
+        - `search:manage` — manage search projects (not used by storage API)
 
   parameters:
     UploadId:
@@ -1844,10 +2096,56 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            ownershipDenied:
+              summary: Not the resource owner (session auth)
+              value:
+                error:
+                  code: ACCESS_DENIED
+                  message: You do not have access to this folder
+            outsideProject:
+              summary: Resource outside project scope (API key auth)
+              value:
+                error:
+                  code: ACCESS_DENIED
+                  message: Resource is outside project scope
+
+    ProjectScopeDenied:
+      description: Access denied — project scope or insufficient API key scope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            accessDenied:
+              summary: No access to resource (session auth)
+              value:
+                error:
+                  code: ACCESS_DENIED
+                  message: You do not have access to this resource
+            outsideProject:
+              summary: Resource outside project scope (API key auth)
+              value:
+                error:
+                  code: ACCESS_DENIED
+                  message: Resource is outside project scope
+            insufficientScope:
+              summary: API key missing required scope
+              value:
+                error:
+                  code: INSUFFICIENT_SCOPE
+                  message: "API key requires scope: storage:read"
+
+    ProjectFolderMissing:
+      description: Project folder not found in database (API key auth only)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
           example:
             error:
-              code: ACCESS_DENIED
-              message: You do not have access to this folder
+              code: PROJECT_FOLDER_MISSING
+              message: "Project storage folder not found"
 
     FolderNotFound:
       description: Folder not found
@@ -1877,10 +2175,19 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
-          example:
-            error:
-              code: ACCESS_DENIED
-              message: You do not have access to this file
+          examples:
+            ownershipDenied:
+              summary: Not the file owner (session auth)
+              value:
+                error:
+                  code: ACCESS_DENIED
+                  message: You do not have access to this file
+            outsideProject:
+              summary: File outside project scope (API key auth)
+              value:
+                error:
+                  code: ACCESS_DENIED
+                  message: Resource is outside project scope
 
 
   schemas:
@@ -2232,6 +2539,17 @@ components:
             userRoot:
               $ref: "#/components/schemas/RootFolder"
             sharedRoot:
+              $ref: "#/components/schemas/RootFolder"
+
+    ApiResponse_ProjectRoot:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [projectRoot]
+          properties:
+            projectRoot:
               $ref: "#/components/schemas/RootFolder"
 
     ApiResponse_FolderCreated:

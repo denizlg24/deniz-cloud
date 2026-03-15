@@ -3,7 +3,7 @@ import { AppLayout } from "@/components/app-layout";
 import { AuthGuard } from "@/components/auth-guard";
 import { DashboardPage } from "@/pages/dashboard";
 import { LoginPage } from "@/pages/login";
-import { SearchPage } from "@/pages/search";
+import { ProjectsPage } from "@/pages/projects";
 import { StoragePage } from "@/pages/storage";
 import { UsersPage } from "@/pages/users";
 
@@ -14,8 +14,8 @@ export function App() {
       <Route element={<AuthGuard />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/users" element={<UsersPage />} />
-          <Route path="/search" element={<SearchPage />} />
           <Route path="/storage" element={<StoragePage />} />
         </Route>
       </Route>

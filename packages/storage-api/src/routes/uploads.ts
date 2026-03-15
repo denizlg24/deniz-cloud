@@ -15,6 +15,7 @@ import {
   resolveSsdDiskPath,
   validatePath,
 } from "../utils/path";
+import { checkProjectScope } from "../utils/project-access";
 
 const TUS_VERSION = "1.0.0";
 const UPLOAD_EXPIRY_HOURS = 24;
@@ -146,7 +147,10 @@ export function uploadRoutes({
       );
     }
 
-    if (!isSharedPath(targetFolder) && folder.ownerId !== user.id) {
+    const uploadProjectCheck = checkProjectScope(c, targetFolder, "storage:write");
+    if (uploadProjectCheck) return uploadProjectCheck;
+
+    if (!c.get("project") && !isSharedPath(targetFolder) && folder.ownerId !== user.id) {
       return c.json(
         { error: { code: "ACCESS_DENIED", message: "You do not have access to this folder" } },
         403,

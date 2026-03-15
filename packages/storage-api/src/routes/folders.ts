@@ -7,6 +7,7 @@ import { count, desc, eq, like, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { deleteDir, ensureDir } from "../utils/fs";
 import {
+  buildProjectRootPath,
   buildUserRootPath,
   isSharedPath,
   joinPath,
@@ -15,6 +16,7 @@ import {
   resolveSsdDiskPath,
   SHARED_ROOT_PATH,
 } from "../utils/path";
+import { checkProjectScope } from "../utils/project-access";
 import { ensureSharedFolder, initUserStorage } from "../utils/storage";
 
 interface FolderRouteDeps {
@@ -39,6 +41,37 @@ export function folderRoutes({
 
   router.get("/roots", async (c) => {
     const user = c.get("user");
+    const project = c.get("project");
+
+    if (project) {
+      const scopeCheck = checkProjectScope(c, buildProjectRootPath(project.slug), "storage:read");
+      if (scopeCheck) return scopeCheck;
+
+      const projectFolder = project.storageFolderId
+        ? await db.query.folders.findFirst({
+            where: eq(folders.id, project.storageFolderId),
+          })
+        : null;
+
+      if (!projectFolder) {
+        return c.json(
+          {
+            error: { code: "PROJECT_FOLDER_MISSING", message: "Project storage folder not found" },
+          },
+          500,
+        );
+      }
+
+      return c.json({
+        data: {
+          projectRoot: {
+            id: projectFolder.id,
+            path: projectFolder.path,
+            name: projectFolder.name,
+          },
+        },
+      });
+    }
 
     const storageConfig = { ssdStoragePath, hddStoragePath, tempUploadPath };
     const [userRoot, sharedRoot] = await Promise.all([
@@ -84,7 +117,10 @@ export function folderRoutes({
       );
     }
 
-    if (!isSharedPath(parent.path) && parent.ownerId !== user.id) {
+    const projectCheck = checkProjectScope(c, parent.path, "storage:write");
+    if (projectCheck) return projectCheck;
+
+    if (!c.get("project") && !isSharedPath(parent.path) && parent.ownerId !== user.id) {
       return c.json(
         { error: { code: "ACCESS_DENIED", message: "You do not have access to this folder" } },
         403,
@@ -155,7 +191,10 @@ export function folderRoutes({
       return c.json({ error: { code: "FOLDER_NOT_FOUND", message: "Folder not found" } }, 404);
     }
 
-    if (!isSharedPath(folder.path) && folder.ownerId !== user.id) {
+    const projectCheck = checkProjectScope(c, folder.path, "storage:read");
+    if (projectCheck) return projectCheck;
+
+    if (!c.get("project") && !isSharedPath(folder.path) && folder.ownerId !== user.id) {
       return c.json(
         { error: { code: "ACCESS_DENIED", message: "You do not have access to this folder" } },
         403,
@@ -186,7 +225,10 @@ export function folderRoutes({
       return c.json({ error: { code: "FOLDER_NOT_FOUND", message: "Folder not found" } }, 404);
     }
 
-    if (!isSharedPath(folder.path) && folder.ownerId !== user.id) {
+    const projectCheck = checkProjectScope(c, folder.path, "storage:read");
+    if (projectCheck) return projectCheck;
+
+    if (!c.get("project") && !isSharedPath(folder.path) && folder.ownerId !== user.id) {
       return c.json(
         { error: { code: "ACCESS_DENIED", message: "You do not have access to this folder" } },
         403,
@@ -279,22 +321,27 @@ export function folderRoutes({
       );
     }
 
-    if (!isSharedPath(folder.path) && folder.ownerId !== user.id) {
-      return c.json(
-        { error: { code: "ACCESS_DENIED", message: "You do not have access to this folder" } },
-        403,
-      );
-    }
-    if (isSharedPath(folder.path) && folder.ownerId !== user.id && user.role !== "superuser") {
-      return c.json(
-        {
-          error: {
-            code: "ACCESS_DENIED",
-            message: "Only the owner or superuser can modify this folder",
+    const patchProjectCheck = checkProjectScope(c, folder.path, "storage:write");
+    if (patchProjectCheck) return patchProjectCheck;
+
+    if (!c.get("project")) {
+      if (!isSharedPath(folder.path) && folder.ownerId !== user.id) {
+        return c.json(
+          { error: { code: "ACCESS_DENIED", message: "You do not have access to this folder" } },
+          403,
+        );
+      }
+      if (isSharedPath(folder.path) && folder.ownerId !== user.id && user.role !== "superuser") {
+        return c.json(
+          {
+            error: {
+              code: "ACCESS_DENIED",
+              message: "Only the owner or superuser can modify this folder",
+            },
           },
-        },
-        403,
-      );
+          403,
+        );
+      }
     }
 
     let normalizedName: string;
@@ -321,7 +368,10 @@ export function folderRoutes({
         );
       }
 
-      if (!isSharedPath(newParent.path) && newParent.ownerId !== user.id) {
+      const targetProjectCheck = checkProjectScope(c, newParent.path, "storage:write");
+      if (targetProjectCheck) return targetProjectCheck;
+
+      if (!c.get("project") && !isSharedPath(newParent.path) && newParent.ownerId !== user.id) {
         return c.json(
           {
             error: {
@@ -447,22 +497,27 @@ export function folderRoutes({
       );
     }
 
-    if (!isSharedPath(folder.path) && folder.ownerId !== user.id) {
-      return c.json(
-        { error: { code: "ACCESS_DENIED", message: "You do not have access to this folder" } },
-        403,
-      );
-    }
-    if (isSharedPath(folder.path) && folder.ownerId !== user.id && user.role !== "superuser") {
-      return c.json(
-        {
-          error: {
-            code: "ACCESS_DENIED",
-            message: "Only the owner or superuser can delete this folder",
+    const deleteProjectCheck = checkProjectScope(c, folder.path, "storage:delete");
+    if (deleteProjectCheck) return deleteProjectCheck;
+
+    if (!c.get("project")) {
+      if (!isSharedPath(folder.path) && folder.ownerId !== user.id) {
+        return c.json(
+          { error: { code: "ACCESS_DENIED", message: "You do not have access to this folder" } },
+          403,
+        );
+      }
+      if (isSharedPath(folder.path) && folder.ownerId !== user.id && user.role !== "superuser") {
+        return c.json(
+          {
+            error: {
+              code: "ACCESS_DENIED",
+              message: "Only the owner or superuser can delete this folder",
+            },
           },
-        },
-        403,
-      );
+          403,
+        );
+      }
     }
 
     const [childFolderCount, childFileCount] = await Promise.all([

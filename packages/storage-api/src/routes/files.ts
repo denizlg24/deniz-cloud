@@ -14,6 +14,7 @@ import {
   PathValidationError,
   resolveSsdDiskPath,
 } from "../utils/path";
+import { checkProjectScope } from "../utils/project-access";
 import { generateShareToken, isValidExpiresIn } from "../utils/share";
 
 interface FileRouteDeps {
@@ -59,7 +60,10 @@ export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
       return c.json({ error: { code: "FOLDER_NOT_FOUND", message: "Folder not found" } }, 404);
     }
 
-    if (!isSharedPath(folder.path) && folder.ownerId !== user.id) {
+    const listProjectCheck = checkProjectScope(c, folder.path, "storage:read");
+    if (listProjectCheck) return listProjectCheck;
+
+    if (!c.get("project") && !isSharedPath(folder.path) && folder.ownerId !== user.id) {
       return c.json(
         { error: { code: "ACCESS_DENIED", message: "You do not have access to this folder" } },
         403,
@@ -114,7 +118,10 @@ export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
       return c.json({ error: { code: "FILE_NOT_FOUND", message: "File not found" } }, 404);
     }
 
-    if (!isSharedPath(file.path) && file.ownerId !== user.id) {
+    const metaProjectCheck = checkProjectScope(c, file.path, "storage:read");
+    if (metaProjectCheck) return metaProjectCheck;
+
+    if (!c.get("project") && !isSharedPath(file.path) && file.ownerId !== user.id) {
       return c.json(
         { error: { code: "ACCESS_DENIED", message: "You do not have access to this file" } },
         403,
@@ -149,7 +156,10 @@ export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
       return c.json({ error: { code: "FILE_NOT_FOUND", message: "File not found" } }, 404);
     }
 
-    if (!isSharedPath(file.path) && file.ownerId !== user.id) {
+    const dlProjectCheck = checkProjectScope(c, file.path, "storage:read");
+    if (dlProjectCheck) return dlProjectCheck;
+
+    if (!c.get("project") && !isSharedPath(file.path) && file.ownerId !== user.id) {
       return c.json(
         { error: { code: "ACCESS_DENIED", message: "You do not have access to this file" } },
         403,
@@ -217,7 +227,10 @@ export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
       return c.json({ error: { code: "FILE_NOT_FOUND", message: "File not found" } }, 404);
     }
 
-    if (!canModify(user, file.ownerId)) {
+    const delProjectCheck = checkProjectScope(c, file.path, "storage:delete");
+    if (delProjectCheck) return delProjectCheck;
+
+    if (!c.get("project") && !canModify(user, file.ownerId)) {
       return c.json(
         {
           error: {
@@ -256,7 +269,10 @@ export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
       return c.json({ error: { code: "FILE_NOT_FOUND", message: "File not found" } }, 404);
     }
 
-    if (!canModify(user, file.ownerId)) {
+    const modProjectCheck = checkProjectScope(c, file.path, "storage:write");
+    if (modProjectCheck) return modProjectCheck;
+
+    if (!c.get("project") && !canModify(user, file.ownerId)) {
       return c.json(
         {
           error: {
@@ -292,7 +308,14 @@ export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
         );
       }
 
-      if (!isSharedPath(targetFolder.path) && targetFolder.ownerId !== user.id) {
+      const moveTargetCheck = checkProjectScope(c, targetFolder.path, "storage:write");
+      if (moveTargetCheck) return moveTargetCheck;
+
+      if (
+        !c.get("project") &&
+        !isSharedPath(targetFolder.path) &&
+        targetFolder.ownerId !== user.id
+      ) {
         return c.json(
           {
             error: {
@@ -393,7 +416,10 @@ export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
       return c.json({ error: { code: "FILE_NOT_FOUND", message: "File not found" } }, 404);
     }
 
-    if (!canModify(user, file.ownerId)) {
+    const shareProjectCheck = checkProjectScope(c, file.path, "storage:read");
+    if (shareProjectCheck) return shareProjectCheck;
+
+    if (!c.get("project") && !canModify(user, file.ownerId)) {
       return c.json(
         {
           error: {

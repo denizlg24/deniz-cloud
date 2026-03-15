@@ -84,8 +84,10 @@ describe("SafeApiKey", () => {
     const apiKey: SafeApiKey = {
       id: "ak1",
       userId: "u1",
+      projectId: "p1",
       name: "My Key",
       keyPrefix: "dc_abc123",
+      scopes: ["storage:read"],
       expiresAt: null,
       lastUsedAt: null,
       createdAt: new Date(),

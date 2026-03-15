@@ -78,10 +78,10 @@ Each API serves its paired UI as static files = only 2 server processes total.
 |-------------|----------|
 | `@deniz-cloud/shared/db` | Drizzle schema, relations, inferred types, `createDb()` |
 | `@deniz-cloud/shared/auth` | `hashPassword`, `verifyPassword`, TOTP, JWT sign/verify, recovery codes |
-| `@deniz-cloud/shared/services` | `registerUser`, `loginWithPassword`, `createSession`, `validateSession`, `createApiKey`, `createPendingUser`, `completeSignup`, `listUsers`, `deleteUser`, `resetUserMfa`, etc. |
-| `@deniz-cloud/shared/middleware` | `auth()` (Bearer + API key), `requireRole()`, `rateLimit()`, `AuthVariables` type |
+| `@deniz-cloud/shared/services` | `registerUser`, `loginWithPassword`, `createSession`, `validateSession`, `createApiKey`, `listApiKeys`, `createProject`, `listProjects`, `getProject`, `deleteProject`, `createPendingUser`, `completeSignup`, `listUsers`, `deleteUser`, `resetUserMfa`, etc. |
+| `@deniz-cloud/shared/middleware` | `auth()` (Bearer + API key), `requireRole()`, `requireScope()`, `rateLimit()`, `AuthVariables` type |
 | `@deniz-cloud/shared/search` | `createMeiliClient`, index CRUD, `generateProjectToken` |
-| `@deniz-cloud/shared/types` | `SafeUser`, `ApiResponse<T>`, `PaginatedResponse<T>`, etc. |
+| `@deniz-cloud/shared/types` | `SafeUser`, `SafeProject`, `SafeApiKey`, `ApiKeyScope`, `API_KEY_SCOPES`, `ApiResponse<T>`, `PaginatedResponse<T>`, etc. |
 | `@deniz-cloud/shared/env` | `requiredEnv()`, `optionalEnv()` |
 
 ## Key Design Decisions
@@ -97,6 +97,7 @@ Each API serves its paired UI as static files = only 2 server processes total.
 - **Pending user signup**: Admin creates username → user completes signup on storage-ui (email, password, mandatory TOTP). Status enum (`pending` | `active`), `passwordHash` nullable until signup completed
 - **Rate limiting**: In-memory per-IP sliding window (`CF-Connecting-IP` → `X-Forwarded-For` → `X-Real-IP`). Applied to login (10/15min) and complete-signup (5/15min). Generic errors on signup to prevent username enumeration
 - **Share links**: Stateless HMAC-signed tokens (fileId:expiresAt), no DB state. Configurable expiration (30m, 1d, 7d, 30d, never)
+- **Projects**: Unified entity for programmatic access — each project has a private storage folder, scoped API keys (with rotation support), and will have MongoDB→Meilisearch collection sync. API keys carry `scopes` (jsonb) enforced via `requireScope()` middleware; session auth bypasses scopes (full access)
 
 ## Docker Memory Budget
 
@@ -152,9 +153,31 @@ Total ~1.45GB for containers, ~2.55GB for OS/cache/host services (cloudflared ru
 - [x] BusyBox-compatible disk parsing (df -kP with KB→bytes conversion, device de-duplication)
 - [ ] Integrate Adminer and Mongo UI (embedded, internal-only)
 
+### Phase 4: Projects & API Keys — COMPLETE
+- [x] `projects` table (name, slug, description, ownerId, storageFolderId, meiliApiKeyUid, meiliApiKey)
+- [x] `api_keys` extended with `projectId` (FK projects) and `scopes` (jsonb)
+- [x] Project service layer (CRUD, auto-creates private storage folder)
+- [x] API key service updates (create with scopes/expiration, list by project, validate returns project+scopes)
+- [x] Auth middleware updated — propagates `project` and `scopes` on API key auth
+- [x] `requireScope()` middleware — enforces scoped access, session auth bypasses (full access)
+- [x] Scope system: `storage:read`, `storage:write`, `storage:delete`, `search:read`, `search:write`, `search:manage`
+- [x] Admin API: project CRUD + nested API key CRUD (7 endpoints under `/api/projects`)
+- [x] Admin UI: projects page with drill-down project detail, API key management (create with scope picker, revoke, copy-once key display)
+- [x] SQL migrations for projects table, api_keys columns, meili fields
+- [x] Storage API: project folder isolation — `checkProjectScope()` utility enforces path prefix + scope on every route handler; API key auth replaces ownership checks with project path boundary; `GET /roots` returns project folder for API key auth
+- [x] Search migrated into project model — `projects` table has nullable `meili_api_key_uid`/`meili_api_key`; search collection CRUD + tenant token endpoints under `/api/projects/:id/search-collections` and `/api/projects/:id/search-token`; auto-creates Meilisearch API key on first collection; old `/api/search` routes kept but deprecated
+
+### Phase 5: MongoDB ↔ Meilisearch Sync — PLANNED
+- See `docs/phase3-mongodb-meilisearch-sync.md` for full design
+- `project_collections` table linking MongoDB collections to Meilisearch indexes
+- Change stream-based incremental sync with resume tokens
+- Embedded sync worker in admin-api (RAM-constrained)
+- Field mapping config (searchable, filterable, sortable attributes)
+- Admin UI: collection management in project detail view
+
 ### Future Phases
-- Phase 4: Backups, fail2ban, TLS certs, load testing
-- Phase 5: S3 API, search, bulk download, mobile UI
+- Phase 6: Backups, fail2ban, TLS certs, load testing
+- Phase 7: S3 API, bulk download, mobile UI, tiering engine
 
 ## Conventions
 

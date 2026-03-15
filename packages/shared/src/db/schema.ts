@@ -83,6 +83,30 @@ export const recoveryCodes = pgTable(
   (table) => [index("recovery_codes_user_id_idx").on(table.userId)],
 );
 
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    slug: varchar("slug", { length: 255 }).notNull().unique(),
+    description: text("description"),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    storageFolderId: uuid("storage_folder_id").references(() => folders.id, {
+      onDelete: "set null",
+    }),
+    meiliApiKeyUid: text("meili_api_key_uid"),
+    meiliApiKey: text("meili_api_key"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("projects_owner_id_idx").on(table.ownerId),
+    index("projects_slug_idx").on(table.slug),
+  ],
+);
+
 export const apiKeys = pgTable(
   "api_keys",
   {
@@ -90,35 +114,59 @@ export const apiKeys = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 255 }).notNull(),
     keyHash: text("key_hash").notNull(),
     keyPrefix: varchar("key_prefix", { length: 12 }).notNull(),
+    scopes: jsonb("scopes").$type<string[]>().notNull().default([]),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("api_keys_user_id_idx").on(table.userId),
+    index("api_keys_project_id_idx").on(table.projectId),
     index("api_keys_key_prefix_idx").on(table.keyPrefix),
   ],
 );
 
-export const searchProjects = pgTable(
-  "search_projects",
+export const syncStatusEnum = pgEnum("sync_status", ["idle", "syncing", "error"]);
+export type SyncStatus = (typeof syncStatusEnum.enumValues)[number];
+
+export const projectCollections = pgTable(
+  "project_collections",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    name: varchar("name", { length: 255 }).notNull().unique(),
-    description: text("description"),
-    ownerId: uuid("owner_id")
+    projectId: uuid("project_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    meiliApiKeyUid: text("meili_api_key_uid").notNull(),
-    meiliApiKey: text("meili_api_key").notNull(),
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    mongoDatabase: varchar("mongo_database", { length: 255 }).notNull(),
+    mongoCollection: varchar("mongo_collection", { length: 255 }).notNull(),
+    meiliIndexUid: varchar("meili_index_uid", { length: 255 }).notNull().unique(),
+    fieldMapping: jsonb("field_mapping").$type<FieldMapping>().notNull().default({}),
+    syncEnabled: boolean("sync_enabled").notNull().default(true),
+    syncStatus: syncStatusEnum("sync_status").notNull().default("idle"),
+    resumeToken: jsonb("resume_token").$type<Record<string, unknown>>(),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    documentCount: integer("document_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("search_projects_owner_id_idx").on(table.ownerId)],
+  (table) => [index("project_collections_project_id_idx").on(table.projectId)],
 );
+
+export interface FieldMapping {
+  includeFields?: string[];
+  excludeFields?: string[];
+  searchableAttributes?: string[];
+  filterableAttributes?: string[];
+  sortableAttributes?: string[];
+  primaryKey?: string;
+}
 
 export const folders = pgTable(
   "folders",
@@ -197,7 +245,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   recoveryCodes: many(recoveryCodes),
   apiKeys: many(apiKeys),
-  searchProjects: many(searchProjects),
+  projects: many(projects),
   folders: many(folders),
   files: many(files),
   tusUploads: many(tusUploads),
@@ -218,14 +266,25 @@ export const recoveryCodesRelations = relations(recoveryCodes, ({ one }) => ({
   }),
 }));
 
-export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
-  user: one(users, { fields: [apiKeys.userId], references: [users.id] }),
+export const projectsRelations = relations(projects, ({ one, many }) => ({
+  owner: one(users, { fields: [projects.ownerId], references: [users.id] }),
+  storageFolder: one(folders, {
+    fields: [projects.storageFolderId],
+    references: [folders.id],
+  }),
+  apiKeys: many(apiKeys),
+  collections: many(projectCollections),
 }));
 
-export const searchProjectsRelations = relations(searchProjects, ({ one }) => ({
-  owner: one(users, {
-    fields: [searchProjects.ownerId],
-    references: [users.id],
+export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
+  user: one(users, { fields: [apiKeys.userId], references: [users.id] }),
+  project: one(projects, { fields: [apiKeys.projectId], references: [projects.id] }),
+}));
+
+export const projectCollectionsRelations = relations(projectCollections, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectCollections.projectId],
+    references: [projects.id],
   }),
 }));
 
@@ -261,11 +320,14 @@ export type NewTotpSecret = InferInsertModel<typeof totpSecrets>;
 export type RecoveryCode = InferSelectModel<typeof recoveryCodes>;
 export type NewRecoveryCode = InferInsertModel<typeof recoveryCodes>;
 
+export type Project = InferSelectModel<typeof projects>;
+export type NewProject = InferInsertModel<typeof projects>;
+
 export type ApiKey = InferSelectModel<typeof apiKeys>;
 export type NewApiKey = InferInsertModel<typeof apiKeys>;
 
-export type SearchProject = InferSelectModel<typeof searchProjects>;
-export type NewSearchProject = InferInsertModel<typeof searchProjects>;
+export type ProjectCollection = InferSelectModel<typeof projectCollections>;
+export type NewProjectCollection = InferInsertModel<typeof projectCollections>;
 
 export type Folder = InferSelectModel<typeof folders>;
 export type NewFolder = InferInsertModel<typeof folders>;

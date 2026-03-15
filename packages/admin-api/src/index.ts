@@ -1,17 +1,26 @@
 import { createDb } from "@deniz-cloud/shared/db";
 import { auth, requireRole } from "@deniz-cloud/shared/middleware";
+import { closeMongoClient, createMongoClient } from "@deniz-cloud/shared/mongo";
 import { createMeiliClient } from "@deniz-cloud/shared/search";
 import { AuthError } from "@deniz-cloud/shared/services";
+import { SyncWorker } from "@deniz-cloud/shared/sync";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { config } from "./config";
 import { authRoutes } from "./routes/auth";
-import { searchRoutes } from "./routes/search";
+import { projectRoutes } from "./routes/projects";
 import { statsRoutes } from "./routes/stats";
 import { userRoutes } from "./routes/users";
 
 const db = createDb(config.databaseUrl);
 const meiliClient = createMeiliClient(config.meiliUrl, config.meiliMasterKey);
+const mongoClient = createMongoClient(config.mongodbUri);
+
+const syncWorker = new SyncWorker({
+  db,
+  mongo: mongoClient,
+  meili: meiliClient,
+});
 
 const app = new Hono();
 
@@ -51,9 +60,9 @@ app.use("/api/stats/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/stats/*", requireRole("superuser"));
 app.route("/api/stats", statsRoutes({ db }));
 
-app.use("/api/search/*", auth(db, config.jwtSecret, COOKIE_NAME));
-app.use("/api/search/*", requireRole("superuser"));
-app.route("/api/search", searchRoutes({ db, meiliClient }));
+app.use("/api/projects/*", auth(db, config.jwtSecret, COOKIE_NAME));
+app.use("/api/projects/*", requireRole("superuser"));
+app.route("/api/projects", projectRoutes({ db, meiliClient, syncWorker }));
 
 app.all("/api/*", (c) =>
   c.json({ error: { code: "NOT_FOUND", message: "Endpoint not found" } }, 404),
@@ -61,6 +70,32 @@ app.all("/api/*", (c) =>
 
 app.use("*", serveStatic({ root: "./static" }));
 app.get("*", serveStatic({ root: "./static", rewriteRequestPath: () => "/index.html" }));
+
+mongoClient
+  .connect()
+  .then(() => {
+    console.log("[admin-api] MongoDB connected");
+    syncWorker.start().catch((err) => {
+      console.error("[admin-api] Sync worker start error:", err);
+    });
+  })
+  .catch((err) => {
+    console.error("[admin-api] MongoDB connection failed:", err);
+    console.error("[admin-api] Sync worker will not start. Collections can still be managed.");
+  });
+
+let isShuttingDown = false;
+const shutdown = async () => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log("[admin-api] Shutting down...");
+  await syncWorker.stop();
+  await closeMongoClient();
+  process.exit(0);
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 export default {
   port: config.port,

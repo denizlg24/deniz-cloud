@@ -80,7 +80,7 @@ class FolderCacheStore {
     if (!entry) return;
     this.cache.set(folderId, {
       data: updater(entry.data),
-      fetchedAt: entry.fetchedAt,
+      fetchedAt: Date.now(),
     });
     this.emit();
   }
