@@ -112,6 +112,8 @@ paths:
         Authenticates a user with username and password. If the user has TOTP enabled,
         a TOTP code or recovery code must also be provided.
 
+        **Rate limited:** 10 requests per 15 minutes per IP.
+
         **Flow:**
         1. Validate username + password
         2. If TOTP is enabled and no code provided, return `401 TOTP_REQUIRED`
@@ -214,6 +216,21 @@ paths:
                     error:
                       code: INVALID_RECOVERY_CODE
                       message: Invalid recovery code
+        "429":
+          description: Rate limit exceeded (10 requests per 15 minutes per IP)
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until the rate limit window resets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: RATE_LIMITED
+                  message: Too many requests, try again later
 
   /api/auth/me:
     get:
@@ -276,6 +293,9 @@ paths:
         Activates a pending user account by setting email, password, and transitioning
         status from "pending" to "active". Auto-creates a session (sets cookie).
         The user should then proceed to set up TOTP.
+
+        **Rate limited:** 5 requests per 15 minutes per IP.
+        Returns a generic error for both invalid and already-active usernames to prevent enumeration.
       tags: [Auth]
       requestBody:
         required: true
@@ -302,17 +322,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponse_LoginData"
         "400":
-          description: Invalid input or account already active
+          description: Invalid input or signup failed (generic to prevent username enumeration)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: Username not found
+              example:
+                error:
+                  code: SIGNUP_FAILED
+                  message: Unable to complete signup
+        "429":
+          description: Rate limit exceeded (5 requests per 15 minutes per IP)
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until the rate limit window resets
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: RATE_LIMITED
+                  message: Too many requests, try again later
 
   /api/auth/setup-totp:
     post:

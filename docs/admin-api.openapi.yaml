@@ -91,6 +91,8 @@ paths:
         are rejected with `403 FORBIDDEN`. If the user has TOTP enabled,
         a TOTP code or recovery code must also be provided.
 
+        **Rate limited:** 10 requests per 15 minutes per IP.
+
         **Flow:**
         1. Validate username + password
         2. Reject if user is not a superuser (`403 FORBIDDEN`)
@@ -204,6 +206,21 @@ paths:
                     error:
                       code: INVALID_RECOVERY_CODE
                       message: Invalid recovery code
+        "429":
+          description: Rate limit exceeded (10 requests per 15 minutes per IP)
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until the rate limit window resets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: RATE_LIMITED
+                  message: Too many requests, try again later
 
   /api/auth/me:
     get:

@@ -42,8 +42,8 @@ deniz-cloud/
 │   │   │   ├── auth/          # Crypto primitives (password, TOTP, JWT, recovery codes)
 │   │   │   ├── db/            # Drizzle schema (6 tables) + postgres.js connection
 │   │   │   ├── search/        # Meilisearch client, index management, tenant tokens
-│   │   │   ├── services/      # Auth service layer (register, login, sessions, API keys)
-│   │   │   ├── middleware/     # Hono auth middleware (session + API key, role guard)
+│   │   │   ├── services/      # Auth service layer (register, login, sessions, API keys, user CRUD)
+│   │   │   ├── middleware/     # Hono auth middleware (session + API key, role guard, rate limiting)
 │   │   │   ├── types/         # API-facing types (SafeUser, ApiResponse, etc.)
 │   │   │   └── env.ts         # Environment variable helpers
 │   │   └── drizzle.config.ts
@@ -53,12 +53,14 @@ deniz-cloud/
 │   │   ├── src/
 │   │   │   ├── routes/
 │   │   │   │   ├── auth.ts    # Login (password+TOTP), logout, me
+│   │   │   │   ├── users.ts   # User CRUD (list, create pending, delete, reset MFA)
+│   │   │   │   ├── stats.ts   # System stats (CPU, RAM, disk) + storage stats
 │   │   │   │   └── search.ts  # Search project/collection CRUD, tenant tokens
 │   │   │   ├── config.ts      # Env config
 │   │   │   ├── index.ts       # App wiring, error handler
 │   │   │   └── seed.ts        # Interactive superuser setup CLI
 │   │   └── .env.example
-│   └── admin-ui/              # React SPA (dashboard, user mgmt, DB tools)
+│   └── admin-ui/              # React SPA (dashboard, user mgmt, search mgmt)
 ├── scripts/
 │   ├── infra/ddns-update.sh   # DDNS updater (cron every 5m)
 │   ├── backup.sh              # DB backup script
@@ -76,8 +78,8 @@ Each API serves its paired UI as static files = only 2 server processes total.
 |-------------|----------|
 | `@deniz-cloud/shared/db` | Drizzle schema, relations, inferred types, `createDb()` |
 | `@deniz-cloud/shared/auth` | `hashPassword`, `verifyPassword`, TOTP, JWT sign/verify, recovery codes |
-| `@deniz-cloud/shared/services` | `registerUser`, `loginWithPassword`, `createSession`, `validateSession`, `createApiKey`, etc. |
-| `@deniz-cloud/shared/middleware` | `auth()` (Bearer + API key), `requireRole()`, `AuthVariables` type |
+| `@deniz-cloud/shared/services` | `registerUser`, `loginWithPassword`, `createSession`, `validateSession`, `createApiKey`, `createPendingUser`, `completeSignup`, `listUsers`, `deleteUser`, `resetUserMfa`, etc. |
+| `@deniz-cloud/shared/middleware` | `auth()` (Bearer + API key), `requireRole()`, `rateLimit()`, `AuthVariables` type |
 | `@deniz-cloud/shared/search` | `createMeiliClient`, index CRUD, `generateProjectToken` |
 | `@deniz-cloud/shared/types` | `SafeUser`, `ApiResponse<T>`, `PaginatedResponse<T>`, etc. |
 | `@deniz-cloud/shared/env` | `requiredEnv()`, `optionalEnv()` |
@@ -92,6 +94,9 @@ Each API serves its paired UI as static files = only 2 server processes total.
 - **Flat file paths + DB mapping**: Simpler for tiering than hierarchical paths
 - **Meilisearch over ES/OpenSearch**: ~80-120MB RAM vs 500MB+; Atlas Search ($search) is Atlas-exclusive, not available on self-hosted MongoDB
 - **Meilisearch multi-tenancy**: Admin-api manages projects/collections (index naming: `{projectId}_{collection}`), issues Meilisearch tenant tokens (scoped JWTs). Apps query Meilisearch directly with tokens — no proxy overhead, cryptographic scope enforcement
+- **Pending user signup**: Admin creates username → user completes signup on storage-ui (email, password, mandatory TOTP). Status enum (`pending` | `active`), `passwordHash` nullable until signup completed
+- **Rate limiting**: In-memory per-IP sliding window (`CF-Connecting-IP` → `X-Forwarded-For` → `X-Real-IP`). Applied to login (10/15min) and complete-signup (5/15min). Generic errors on signup to prevent username enumeration
+- **Share links**: Stateless HMAC-signed tokens (fileId:expiresAt), no DB state. Configurable expiration (30m, 1d, 7d, 30d, never)
 
 ## Docker Memory Budget
 
@@ -117,24 +122,37 @@ Total ~1.45GB for containers, ~2.55GB for OS/cache/host services (cloudflared ru
 - [x] Superuser seed CLI (`bun run seed:admin` in admin-api)
 - [x] Unit tests (40 passing) — password, TOTP, JWT, recovery codes, search indexes, env
 
-### Phase 2: Storage Service — IN PROGRESS
-- [x] Storage API (Hono): TUS resumable upload, download, delete, rename, move, folder CRUD
+### Phase 2: Storage Service — COMPLETE
+- [x] Storage API (Hono): TUS resumable upload, download (with HTTP Range support), delete, rename, move, folder CRUD
 - [x] File metadata in Postgres via Drizzle
 - [x] Storage API auth routes — login (password+TOTP), logout, me (cookie-based sessions)
 - [x] Storage API seed CLI (`bun run seed:storage`)
 - [x] Cookie middleware in shared — `setCookieToken()` / `clearCookieToken()` for httpOnly cookie auth
 - [x] Auth middleware updated — reads JWT from `Authorization` header OR `token` cookie
 - [x] Admin API login restricted to superusers only (403 for non-superusers)
-- [x] Storage web UI (React + Vite + shadcn/ui + Tailwind): login, file browser (grid/list), folder navigation, breadcrumbs, create/rename/delete dialogs, TUS upload with drag-and-drop + progress, file preview (images, video, audio, PDF, code, text, markdown), folder caching
-- [x] Admin UI scaffolding (React + Vite + shadcn/ui + Tailwind)
-- [x] OpenAPI specs updated for storage-api and admin-api auth
+- [x] Storage web UI (React + Vite + shadcn/ui + Tailwind): login, signup flow, MFA setup, file browser (grid/list), folder navigation, breadcrumbs, create/rename/delete dialogs, TUS upload with drag-and-drop + progress, file preview (images, video, audio, PDF, code, text, markdown), folder caching
+- [x] Shareable public links — HMAC-signed stateless tokens with configurable expiration, share dialog in UI
+- [x] Pending user signup flow — admin creates username → user completes on storage-ui (email, password, mandatory TOTP)
+- [x] MFA enforcement — auth guard redirects to `/setup-mfa` if TOTP not enabled
+- [x] Rate limiting on login (10/15min) and complete-signup (5/15min) per IP
+- [x] Username enumeration prevention — generic error responses on complete-signup
+- [x] OpenAPI specs updated for storage-api and admin-api
 - [x] Docker Compose healthcheck fix
 - [ ] Tiering engine: SSD/HDD migration logic, on-access promotion
 - [ ] Tiering cron job
-- [ ] Shareable public links
+
+### Phase 3: Admin Panel — COMPLETE
+- [x] Admin API: system stats (CPU, RAM, disk via /proc with node:os fallback), storage stats (file counts, sizes, tiers)
+- [x] Admin API: user management (list, create pending, delete, reset MFA) — superuser only
+- [x] Admin web UI (React + Vite + shadcn/ui + Tailwind): dashboard with radial gauge charts, user management table, responsive sidebar layout
+- [x] Rate limiting on admin login (10/15min) per IP
+- [x] Docker bind mounts (`/proc:/host/proc:ro`, `/sys:/host/sys:ro`) for host-level stats
+- [x] Docker build optimization — cache mounts for bun install, sequential stage execution
+- [x] Cross-platform stats fallback (node:os for CPU/RAM on non-Linux, empty disk on Windows)
+- [x] BusyBox-compatible disk parsing (df -kP with KB→bytes conversion, device de-duplication)
+- [ ] Integrate Adminer and Mongo UI (embedded, internal-only)
 
 ### Future Phases
-- Phase 3: Admin panel (stats, user mgmt, DB tools)
 - Phase 4: Backups, fail2ban, TLS certs, load testing
 - Phase 5: S3 API, search, bulk download, mobile UI
 

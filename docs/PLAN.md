@@ -581,15 +581,27 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 - [x] Build admin UI scaffolding (React + Vite SPA with shadcn/ui + Tailwind)
 - [x] OpenAPI specs updated for both storage-api and admin-api auth routes
 - [x] Docker Compose healthcheck fix (pg_isready now checks correct database)
+- [x] Shareable public links — HMAC-signed stateless tokens with configurable expiration, share dialog in UI
+- [x] HTTP Range request support for file downloads (206 Partial Content)
+- [x] Pending user signup flow — admin creates username → user completes on storage-ui (email, password, mandatory TOTP setup)
+- [x] MFA enforcement — auth guard redirects to `/setup-mfa` if TOTP not enabled after signup
+- [x] Rate limiting middleware in shared package (per-IP sliding window, CF-Connecting-IP aware)
+- [x] Rate limiting applied to login (10/15min) and complete-signup (5/15min) endpoints
+- [x] Username enumeration prevention — generic error on complete-signup failure
+- [x] User status enum (`pending` | `active`) added to schema, `passwordHash` made nullable
+- [x] Docker build optimization — cache mounts for bun install, sequential stage execution via COPY --from dependency
+- [x] Cross-platform stats fallback (node:os for CPU/RAM, empty disk on Windows dev)
+- [x] BusyBox-compatible disk parsing (df -kP with KB→bytes, device de-duplication)
 - [ ] Build tiering engine: SSD/HDD migration logic, on-access promotion
 - [ ] Set up tiering cron job
-- [ ] Add file previews: PDF rendering, code syntax highlighting
-- [ ] Implement shareable public links
 
-### Phase 3: Admin Panel
+### Phase 3: Admin Panel — COMPLETE
 
-- [ ] Build admin API: system stats, user CRUD, backup management, tiering config
-- [ ] Build admin web UI: dashboard, storage overview, user management
+- [x] Admin API: system stats (CPU, RAM, disk via /proc with node:os fallback), storage stats (file counts, sizes, tiers, users, sessions)
+- [x] Admin API: user CRUD (list paginated, create pending, delete, reset MFA) — superuser only
+- [x] Admin web UI (React + Vite + shadcn/ui + Tailwind): dashboard with radial gauge charts, user management table with create/delete/reset-MFA, responsive collapsible sidebar
+- [x] Rate limiting on admin login (10/15min per IP)
+- [x] Docker bind mounts (`/proc:/host/proc:ro`, `/sys:/host/sys:ro`) for host-level system stats
 - [ ] Integrate Adminer and Mongo UI (embedded, internal-only)
 - [ ] Expose health monitor data in dashboard
 
