@@ -20,18 +20,20 @@ RUN cd packages/admin-ui && bun run build
 FROM oven/bun:1-alpine
 WORKDIR /app
 
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/bun.lock ./bun.lock
-COPY --from=build /app/packages/shared/package.json ./packages/shared/package.json
-COPY --from=build /app/packages/admin-api/package.json ./packages/admin-api/package.json
-COPY --from=build /app/packages/admin-ui/package.json ./packages/admin-ui/package.json
-COPY --from=build /app/packages/storage-api/package.json ./packages/storage-api/package.json
-COPY --from=build /app/packages/storage-ui/package.json ./packages/storage-ui/package.json
+# Copy built UI first to sequence this stage after the build stage completes
+COPY --from=build /app/packages/admin-ui/dist ./packages/admin-api/static
+
+COPY package.json bun.lock ./
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/admin-api/package.json ./packages/admin-api/
+COPY packages/admin-ui/package.json ./packages/admin-ui/
+COPY packages/storage-api/package.json ./packages/storage-api/
+COPY packages/storage-ui/package.json ./packages/storage-ui/
+
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --ignore-scripts
 
 COPY packages/shared/ ./packages/shared/
 COPY packages/admin-api/ ./packages/admin-api/
-COPY --from=build /app/packages/admin-ui/dist ./packages/admin-api/static
 
 WORKDIR /app/packages/admin-api
 ENV NODE_ENV=production
