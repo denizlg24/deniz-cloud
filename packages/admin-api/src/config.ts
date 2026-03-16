@@ -8,4 +8,5 @@ export const config = {
   meiliUrl: requiredEnv("MEILI_URL"),
   meiliMasterKey: requiredEnv("MEILI_MASTER_KEY"),
   mongodbUri: requiredEnv("MONGODB_URI"),
+  mongodbAdminUri: requiredEnv("MONGODB_ADMIN_URI"),
 };

@@ -296,7 +296,6 @@ function MongoCollectionDetail({
           <h3 className="text-sm font-medium mb-2">Sample Documents ({sample.length})</h3>
           <div className="space-y-2">
             {sample.map((doc, i) => (
-              
               <pre
                 // biome-ignore lint/suspicious/noArrayIndexKey: can;t know unique id for sample documents
                 key={i}
@@ -488,7 +487,7 @@ function MongoFindPanel({ database, collection }: { database: string; collection
           <div className="space-y-2">
             {result.documents.map((doc, i) => (
               <pre
-              // biome-ignore lint/suspicious/noArrayIndexKey: can;t know unique id for sample documents
+                // biome-ignore lint/suspicious/noArrayIndexKey: can;t know unique id for sample documents
                 key={i}
                 className="border rounded-lg p-3 text-xs font-mono overflow-x-auto bg-muted/50 max-h-48"
               >

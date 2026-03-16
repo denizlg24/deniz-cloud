@@ -1,6 +1,7 @@
 import { createDb } from "@deniz-cloud/shared/db";
 import { auth, requireRole } from "@deniz-cloud/shared/middleware";
 import { closeMongoClient, createMongoClient } from "@deniz-cloud/shared/mongo";
+import { MongoClient } from "mongodb";
 import { createMeiliClient } from "@deniz-cloud/shared/search";
 import { AuthError } from "@deniz-cloud/shared/services";
 import { SyncWorker } from "@deniz-cloud/shared/sync";
@@ -17,6 +18,10 @@ import { userRoutes } from "./routes/users";
 const db = createDb(config.databaseUrl);
 const meiliClient = createMeiliClient(config.meiliUrl, config.meiliMasterKey);
 const mongoClient = createMongoClient(config.mongodbUri);
+const mongoAdminClient = new MongoClient(config.mongodbAdminUri, {
+  serverSelectionTimeoutMS: 5000,
+  connectTimeoutMS: 5000,
+});
 
 const syncWorker = new SyncWorker({
   db,
@@ -69,7 +74,7 @@ app.route("/api/projects", projectRoutes({ db, meiliClient, syncWorker }));
 app.use("/api/db/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/db/*", requireRole("superuser"));
 app.route("/api/db/postgres", postgresDbRoutes({ db, databaseUrl: config.databaseUrl }));
-app.route("/api/db/mongodb", mongoDbRoutes({ mongoClient }));
+app.route("/api/db/mongodb", mongoDbRoutes({ mongoClient: mongoAdminClient }));
 
 app.all("/api/*", (c) =>
   c.json({ error: { code: "NOT_FOUND", message: "Endpoint not found" } }, 404),
@@ -78,10 +83,9 @@ app.all("/api/*", (c) =>
 app.use("*", serveStatic({ root: "./static" }));
 app.get("*", serveStatic({ root: "./static", rewriteRequestPath: () => "/index.html" }));
 
-mongoClient
-  .connect()
+Promise.all([mongoClient.connect(), mongoAdminClient.connect()])
   .then(() => {
-    console.log("[admin-api] MongoDB connected");
+    console.log("[admin-api] MongoDB connected (sync + admin)");
     syncWorker.start().catch((err) => {
       console.error("[admin-api] Sync worker start error:", err);
     });
@@ -97,6 +101,7 @@ const shutdown = async () => {
   isShuttingDown = true;
   console.log("[admin-api] Shutting down...");
   await syncWorker.stop();
+  await mongoAdminClient.close();
   await closeMongoClient();
   process.exit(0);
 };
