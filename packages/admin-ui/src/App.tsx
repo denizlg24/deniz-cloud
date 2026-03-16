@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import { AppLayout } from "@/components/app-layout";
 import { AuthGuard } from "@/components/auth-guard";
 import { DashboardPage } from "@/pages/dashboard";
+import { DatabasesPage } from "@/pages/databases";
 import { LoginPage } from "@/pages/login";
 import { ProjectsPage } from "@/pages/projects";
 import { StoragePage } from "@/pages/storage";
@@ -17,6 +18,7 @@ export function App() {
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/storage" element={<StoragePage />} />
+          <Route path="/databases" element={<DatabasesPage />} />
         </Route>
       </Route>
     </Routes>

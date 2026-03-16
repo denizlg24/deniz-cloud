@@ -1,4 +1,4 @@
-import { BarChart3, FolderOpen, HardDrive, LogOut, Users } from "lucide-react";
+import { BarChart3, Database, FolderOpen, HardDrive, LogOut, Users } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -21,6 +21,7 @@ import { useAuth } from "@/lib/auth";
 const navItems = [
   { to: "/", icon: BarChart3, label: "Dashboard" },
   { to: "/projects", icon: FolderOpen, label: "Projects" },
+  { to: "/databases", icon: Database, label: "Databases" },
   { to: "/users", icon: Users, label: "Users" },
   { to: "/storage", icon: HardDrive, label: "Storage" },
 ];

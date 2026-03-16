@@ -6,7 +6,8 @@ info:
     Admin panel API for Deniz Cloud self-hosted home server.
     Provides authentication (password + TOTP 2FA), session management,
     project management (with API keys, Meilisearch collections, and tenant tokens),
-    user administration, and system statistics.
+    user administration, system statistics, and database management
+    (PostgreSQL and MongoDB browsing, DDL, and query execution).
 
     **Base URL:** `https://cloud.denizlg24.com`
 
@@ -68,6 +69,10 @@ tags:
     description: Meilisearch collection/index management within a project (superuser only)
   - name: Search Tokens
     description: Meilisearch tenant token generation for a project (superuser only)
+  - name: Postgres Database Management
+    description: PostgreSQL database browsing, table management, and query execution (superuser only)
+  - name: MongoDB Database Management
+    description: MongoDB database browsing, collection/index management, and document querying (superuser only)
 
 paths:
   /api/health:
@@ -1014,6 +1019,918 @@ paths:
         "404":
           $ref: "#/components/responses/ProjectNotFound"
 
+  # --- PostgreSQL Database Management ---
+
+  /api/db/postgres/databases:
+    get:
+      operationId: listPostgresDatabases
+      summary: List PostgreSQL databases
+      description: |
+        Returns all non-template databases with their sizes.
+        Protected databases (`postgres`, `template0`, `template1`, and the app database)
+        are flagged with `isProtected: true` and cannot be dropped.
+      tags: [Postgres Database Management]
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: List of databases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_PgDatabaseList"
+              example:
+                data:
+                  - name: postgres
+                    sizeBytes: 8945664
+                    isProtected: true
+                  - name: myapp
+                    sizeBytes: 24576000
+                    isProtected: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      operationId: createPostgresDatabase
+      summary: Create a PostgreSQL database
+      description: |
+        Creates a new PostgreSQL database.
+
+        **Name constraints:** Must match `^[a-zA-Z_][a-zA-Z0-9_]{0,62}$`.
+      tags: [Postgres Database Management]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDatabaseRequest"
+            example:
+              name: analytics
+      responses:
+        "201":
+          description: Database created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_CreatedDatabase"
+              example:
+                data:
+                  name: analytics
+        "400":
+          description: Invalid database name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/db/postgres/databases/{name}:
+    delete:
+      operationId: dropPostgresDatabase
+      summary: Drop a PostgreSQL database
+      description: |
+        Drops a PostgreSQL database. Terminates all active connections first.
+        Protected databases (`postgres`, `template0`, `template1`, and the app database)
+        cannot be dropped and return `403 PROTECTED_DATABASE`.
+      tags: [Postgres Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+      responses:
+        "200":
+          description: Database dropped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_DroppedName"
+              example:
+                data:
+                  dropped: analytics
+        "400":
+          description: Invalid database name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Protected database or insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                protected:
+                  summary: Attempt to drop a protected database
+                  value:
+                    error:
+                      code: PROTECTED_DATABASE
+                      message: 'Database "postgres" cannot be dropped'
+                forbidden:
+                  summary: Insufficient permissions
+                  value:
+                    error:
+                      code: FORBIDDEN
+                      message: Insufficient permissions
+
+  /api/db/postgres/databases/{name}/schemas:
+    get:
+      operationId: listPostgresSchemas
+      summary: List schemas in a PostgreSQL database
+      description: |
+        Returns all user-defined schemas in a database (excludes `pg_catalog`,
+        `information_schema`, and `pg_toast`).
+      tags: [Postgres Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+      responses:
+        "200":
+          description: List of schemas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_SchemaList"
+              example:
+                data:
+                  - name: public
+        "400":
+          description: Invalid database name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/db/postgres/databases/{name}/tables:
+    get:
+      operationId: listPostgresTables
+      summary: List tables in a PostgreSQL database
+      description: |
+        Returns base tables in a schema with row estimates and sizes.
+        Defaults to the `public` schema.
+      tags: [Postgres Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - name: schema
+          in: query
+          schema:
+            type: string
+            default: public
+          description: Schema to list tables from (default `public`)
+      responses:
+        "200":
+          description: List of tables
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_PgTableList"
+              example:
+                data:
+                  - name: users
+                    schema: public
+                    rowEstimate: 42
+                    sizeBytes: 81920
+        "400":
+          description: Invalid database or schema name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      operationId: createPostgresTable
+      summary: Create a table in a PostgreSQL database
+      description: |
+        Creates a new table with the specified columns. At least one column is required.
+
+        **Name constraints:** Table and column names must match `^[a-zA-Z_][a-zA-Z0-9_]{0,62}$`.
+
+        **Allowed column types:** `serial`, `bigserial`, `integer`, `bigint`, `smallint`, `text`,
+        `varchar`, `char`, `boolean`, `timestamp`, `timestamptz`, `date`, `time`, `numeric`,
+        `real`, `double precision`, `jsonb`, `json`, `uuid`, `bytea`, `inet`, `cidr`, `macaddr`.
+      tags: [Postgres Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - name: schema
+          in: query
+          schema:
+            type: string
+            default: public
+          description: Schema to create the table in (default `public`)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePgTableRequest"
+            example:
+              name: events
+              columns:
+                - name: id
+                  type: serial
+                  primaryKey: true
+                - name: event_name
+                  type: text
+                  nullable: false
+                - name: payload
+                  type: jsonb
+                - name: created_at
+                  type: timestamptz
+                  default: now()
+      responses:
+        "201":
+          description: Table created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_CreatedTable"
+              example:
+                data:
+                  name: events
+                  schema: public
+        "400":
+          description: Invalid input (name, type, or missing columns)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/db/postgres/databases/{name}/tables/{table}:
+    get:
+      operationId: getPostgresTableDetail
+      summary: Get table details (columns, indexes, constraints)
+      description: |
+        Returns detailed information about a table including all columns, indexes,
+        and constraints.
+      tags: [Postgres Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - $ref: "#/components/parameters/TableName"
+        - name: schema
+          in: query
+          schema:
+            type: string
+            default: public
+          description: Schema the table belongs to (default `public`)
+      responses:
+        "200":
+          description: Table detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_PgTableDetail"
+              example:
+                data:
+                  columns:
+                    - name: id
+                      type: integer
+                      nullable: false
+                      default: "nextval('events_id_seq'::regclass)"
+                      position: 1
+                    - name: event_name
+                      type: text
+                      nullable: false
+                      default: null
+                      position: 2
+                  indexes:
+                    - name: events_pkey
+                      definition: "CREATE UNIQUE INDEX events_pkey ON public.events USING btree (id)"
+                  constraints:
+                    - name: events_pkey
+                      type: PRIMARY KEY
+                      columns: [id]
+        "400":
+          description: Invalid name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    delete:
+      operationId: dropPostgresTable
+      summary: Drop a table
+      description: |
+        Drops a table from a PostgreSQL database. Application-managed tables
+        (`users`, `sessions`, `files`, `folders`, `api_keys`, `projects`, `project_collections`)
+        in the app database are protected and return `403 PROTECTED_TABLE`.
+      tags: [Postgres Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - $ref: "#/components/parameters/TableName"
+        - name: schema
+          in: query
+          schema:
+            type: string
+            default: public
+          description: Schema the table belongs to (default `public`)
+      responses:
+        "200":
+          description: Table dropped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_DroppedName"
+              example:
+                data:
+                  dropped: events
+        "400":
+          description: Invalid name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Protected table or insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: PROTECTED_TABLE
+                  message: Table "users" is managed by the application and cannot be dropped
+
+  /api/db/postgres/databases/{name}/query:
+    post:
+      operationId: executePostgresQuery
+      summary: Execute a raw SQL query
+      description: |
+        Executes a raw SQL query against a PostgreSQL database and returns the results.
+        Results are capped at 500 rows. Query length is limited to 10,000 characters.
+
+        **Warning:** This endpoint executes arbitrary SQL. Use with caution.
+      tags: [Postgres Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PgQueryRequest"
+            example:
+              sql: "SELECT * FROM users LIMIT 10"
+      responses:
+        "200":
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_PgQueryResult"
+              example:
+                data:
+                  columns: [id, username, email]
+                  rows:
+                    - id: 1
+                      username: admin
+                      email: admin@example.com
+                  rowCount: 1
+                  truncated: false
+                  durationMs: 12
+        "400":
+          description: Invalid query or query error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PgQueryErrorResponse"
+              examples:
+                missingQuery:
+                  summary: No SQL provided
+                  value:
+                    error:
+                      code: QUERY_ERROR
+                      message: SQL query is required
+                queryError:
+                  summary: SQL execution error
+                  value:
+                    error:
+                      code: QUERY_ERROR
+                      message: 'relation "nonexistent" does not exist'
+                    data:
+                      durationMs: 3
+                tooLong:
+                  summary: Query exceeds 10,000 characters
+                  value:
+                    error:
+                      code: QUERY_ERROR
+                      message: Query too long (max 10000 chars)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # --- MongoDB Database Management ---
+
+  /api/db/mongodb/databases:
+    get:
+      operationId: listMongoDatabases
+      summary: List MongoDB databases
+      description: |
+        Returns all databases with their sizes.
+        Protected databases (`admin`, `config`, `local`) are flagged with `isProtected: true`
+        and cannot be dropped.
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: List of databases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_MongoDatabaseList"
+              example:
+                data:
+                  - name: admin
+                    sizeBytes: 40960
+                    empty: false
+                    isProtected: true
+                  - name: myapp
+                    sizeBytes: 1048576
+                    empty: false
+                    isProtected: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      operationId: createMongoDatabase
+      summary: Create a MongoDB database
+      description: |
+        Creates a new MongoDB database by creating an `_init` collection in it.
+
+        **Name constraints:** Must match `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$`, no `$` or null bytes.
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDatabaseRequest"
+            example:
+              name: analytics
+      responses:
+        "201":
+          description: Database created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_CreatedDatabase"
+              example:
+                data:
+                  name: analytics
+        "400":
+          description: Invalid database name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/db/mongodb/databases/{name}:
+    delete:
+      operationId: dropMongoDatabase
+      summary: Drop a MongoDB database
+      description: |
+        Drops a MongoDB database and all its collections.
+        Protected databases (`admin`, `config`, `local`) cannot be dropped
+        and return `403 PROTECTED_DATABASE`.
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+      responses:
+        "200":
+          description: Database dropped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_DroppedName"
+              example:
+                data:
+                  dropped: analytics
+        "400":
+          description: Invalid database name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Protected database or insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/db/mongodb/databases/{name}/collections:
+    get:
+      operationId: listMongoCollections
+      summary: List collections in a MongoDB database
+      description: |
+        Returns all collections with estimated document counts and index counts.
+        System collections (`system.*`) report zero stats.
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+      responses:
+        "200":
+          description: List of collections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_MongoCollectionList"
+              example:
+                data:
+                  - name: events
+                    type: collection
+                    documentCount: 1500
+                    sizeBytes: 0
+                    indexCount: 2
+        "400":
+          description: Invalid database name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      operationId: createMongoCollection
+      summary: Create a collection in a MongoDB database
+      description: |
+        Creates a new collection, optionally capped.
+
+        **Name constraints:** Must match `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$`, no `$` or null bytes.
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMongoCollectionRequest"
+            examples:
+              basic:
+                summary: Standard collection
+                value:
+                  name: events
+              capped:
+                summary: Capped collection
+                value:
+                  name: logs
+                  capped: true
+                  size: 10485760
+                  max: 5000
+      responses:
+        "201":
+          description: Collection created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_CreatedDatabase"
+              example:
+                data:
+                  name: events
+        "400":
+          description: Invalid collection name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/db/mongodb/databases/{name}/collections/{collName}:
+    delete:
+      operationId: dropMongoCollection
+      summary: Drop a collection
+      description: Drops a collection and all its documents and indexes.
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - $ref: "#/components/parameters/MongoCollectionName"
+      responses:
+        "200":
+          description: Collection dropped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_DroppedName"
+              example:
+                data:
+                  dropped: events
+        "400":
+          description: Invalid name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/db/mongodb/databases/{name}/collections/{collName}/indexes:
+    get:
+      operationId: listMongoIndexes
+      summary: List indexes on a collection
+      description: Returns all indexes on a MongoDB collection.
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - $ref: "#/components/parameters/MongoCollectionName"
+      responses:
+        "200":
+          description: List of indexes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_MongoIndexList"
+              example:
+                data:
+                  - name: _id_
+                    key: { _id: 1 }
+                    unique: true
+                    sparse: false
+                  - name: event_name_1
+                    key: { event_name: 1 }
+                    unique: false
+                    sparse: false
+        "400":
+          description: Invalid name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      operationId: createMongoIndex
+      summary: Create an index on a collection
+      description: |
+        Creates a new index on a MongoDB collection. At least one field is required.
+        Supports unique and sparse options, and an optional custom index name.
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - $ref: "#/components/parameters/MongoCollectionName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMongoIndexRequest"
+            example:
+              fields:
+                - name: event_name
+                  direction: 1
+                - name: created_at
+                  direction: -1
+              unique: false
+      responses:
+        "201":
+          description: Index created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_CreatedDatabase"
+              example:
+                data:
+                  name: event_name_1_created_at_-1
+        "400":
+          description: Invalid input or no fields provided
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/db/mongodb/databases/{name}/collections/{collName}/indexes/{indexName}:
+    delete:
+      operationId: dropMongoIndex
+      summary: Drop an index
+      description: |
+        Drops an index from a MongoDB collection.
+        The `_id_` index is protected and cannot be dropped (returns `403 PROTECTED_INDEX`).
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - $ref: "#/components/parameters/MongoCollectionName"
+        - name: indexName
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Index name
+      responses:
+        "200":
+          description: Index dropped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_DroppedName"
+              example:
+                data:
+                  dropped: event_name_1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Protected index or insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: PROTECTED_INDEX
+                  message: The _id_ index cannot be dropped
+
+  /api/db/mongodb/databases/{name}/collections/{collName}/sample:
+    get:
+      operationId: sampleMongoDocuments
+      summary: Sample documents from a collection
+      description: Returns up to 5 documents from a collection (no filter, natural order).
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - $ref: "#/components/parameters/MongoCollectionName"
+      responses:
+        "200":
+          description: Sample documents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_MongoSample"
+              example:
+                data:
+                  - _id: "6614a1b2c3d4e5f6a7b8c9d0"
+                    event_name: page_view
+                    timestamp: "2026-03-15T10:30:00Z"
+        "400":
+          description: Invalid name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/db/mongodb/databases/{name}/collections/{collName}/find:
+    post:
+      operationId: queryMongoDocuments
+      summary: Query documents in a collection
+      description: |
+        Executes a find query against a MongoDB collection with optional filter, sort, limit, and skip.
+        Results are capped at 100 documents per request.
+
+        Filter and sort must be valid JSON strings representing MongoDB query/sort objects.
+      tags: [MongoDB Database Management]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DatabaseName"
+        - $ref: "#/components/parameters/MongoCollectionName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MongoFindRequest"
+            examples:
+              basic:
+                summary: Simple filter
+                value:
+                  filter: '{"event_name": "page_view"}'
+                  limit: 20
+              withSort:
+                summary: Filter with sort and pagination
+                value:
+                  filter: '{"event_name": "page_view"}'
+                  sort: '{"timestamp": -1}'
+                  limit: 50
+                  skip: 100
+      responses:
+        "200":
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse_MongoFindResult"
+              example:
+                data:
+                  documents:
+                    - _id: "6614a1b2c3d4e5f6a7b8c9d0"
+                      event_name: page_view
+                      timestamp: "2026-03-15T10:30:00Z"
+                  totalCount: 42
+                  durationMs: 8
+        "400":
+          description: Invalid filter/sort JSON or query error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MongoQueryErrorResponse"
+              examples:
+                invalidFilter:
+                  summary: Malformed filter JSON
+                  value:
+                    error:
+                      code: INVALID_FILTER
+                      message: Filter must be valid JSON
+                invalidSort:
+                  summary: Malformed sort JSON
+                  value:
+                    error:
+                      code: INVALID_SORT
+                      message: Sort must be valid JSON
+                queryError:
+                  summary: Query execution error
+                  value:
+                    error:
+                      code: QUERY_ERROR
+                      message: unknown top level operator $invalid
+                    data:
+                      durationMs: 2
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -1049,6 +1966,30 @@ components:
         pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
         maxLength: 50
       description: Collection name (lowercase alphanumeric with hyphens)
+    DatabaseName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
+      description: Database name
+    TableName:
+      name: table
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
+      description: Table name
+    MongoCollectionName:
+      name: collName
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$
+      description: MongoDB collection name
 
   responses:
     Unauthorized:
@@ -1681,3 +2622,461 @@ components:
           type: integer
           minimum: 0
           description: Total number of pages
+
+    # --- Database Management Request Schemas ---
+
+    CreateDatabaseRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Database name
+
+    CreatePgTableRequest:
+      type: object
+      required: [name, columns]
+      properties:
+        name:
+          type: string
+          pattern: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
+          description: Table name
+        columns:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [name, type]
+            properties:
+              name:
+                type: string
+                pattern: ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
+                description: Column name
+              type:
+                type: string
+                description: |
+                  Column data type. Allowed values: `serial`, `bigserial`, `integer`, `bigint`,
+                  `smallint`, `text`, `varchar`, `char`, `boolean`, `timestamp`, `timestamptz`,
+                  `date`, `time`, `numeric`, `real`, `double precision`, `jsonb`, `json`, `uuid`,
+                  `bytea`, `inet`, `cidr`, `macaddr`.
+              nullable:
+                type: boolean
+                default: true
+                description: Whether the column allows NULL values
+              default:
+                type: string
+                description: SQL default expression (e.g. `now()`, `gen_random_uuid()`)
+              primaryKey:
+                type: boolean
+                default: false
+                description: Whether this column is part of the primary key
+
+    PgQueryRequest:
+      type: object
+      required: [sql]
+      properties:
+        sql:
+          type: string
+          maxLength: 10000
+          description: SQL query to execute (max 10,000 characters)
+
+    CreateMongoCollectionRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          pattern: ^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$
+          description: Collection name
+        capped:
+          type: boolean
+          default: false
+          description: Whether to create a capped collection
+        size:
+          type: integer
+          description: Maximum size in bytes (required for capped collections)
+        max:
+          type: integer
+          description: Maximum number of documents (optional, for capped collections)
+
+    CreateMongoIndexRequest:
+      type: object
+      required: [fields]
+      properties:
+        fields:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [name, direction]
+            properties:
+              name:
+                type: string
+                description: Field name
+              direction:
+                type: integer
+                enum: [1, -1]
+                description: Sort direction (1 = ascending, -1 = descending)
+          description: Index fields with sort direction
+        unique:
+          type: boolean
+          default: false
+          description: Whether the index enforces uniqueness
+        sparse:
+          type: boolean
+          default: false
+          description: Whether the index only includes documents with the indexed fields
+        name:
+          type: string
+          description: Optional custom index name
+
+    MongoFindRequest:
+      type: object
+      properties:
+        filter:
+          type: string
+          description: 'MongoDB filter as a JSON string (e.g. ''{"status": "active"}'')'
+        sort:
+          type: string
+          description: 'MongoDB sort as a JSON string (e.g. ''{"createdAt": -1}'')'
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+          description: Maximum documents to return (1-100, default 20)
+        skip:
+          type: integer
+          minimum: 0
+          default: 0
+          description: Number of documents to skip (for pagination)
+
+    # --- Database Management Response Schemas ---
+
+    PgDatabase:
+      type: object
+      required: [name, sizeBytes, isProtected]
+      properties:
+        name:
+          type: string
+        sizeBytes:
+          type: integer
+        isProtected:
+          type: boolean
+          description: Whether this is a system/app database that cannot be dropped
+
+    MongoDatabase:
+      type: object
+      required: [name, sizeBytes, empty, isProtected]
+      properties:
+        name:
+          type: string
+        sizeBytes:
+          type: integer
+        empty:
+          type: boolean
+        isProtected:
+          type: boolean
+          description: Whether this is a system database that cannot be dropped
+
+    PgTable:
+      type: object
+      required: [name, schema, rowEstimate, sizeBytes]
+      properties:
+        name:
+          type: string
+        schema:
+          type: string
+        rowEstimate:
+          type: integer
+          description: Estimated row count from pg_class.reltuples
+        sizeBytes:
+          type: integer
+          description: Total relation size including indexes
+
+    PgTableDetail:
+      type: object
+      required: [columns, indexes, constraints]
+      properties:
+        columns:
+          type: array
+          items:
+            type: object
+            required: [name, type, nullable, position]
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+              nullable:
+                type: boolean
+              default:
+                type: ["string", "null"]
+              position:
+                type: integer
+        indexes:
+          type: array
+          items:
+            type: object
+            required: [name, definition]
+            properties:
+              name:
+                type: string
+              definition:
+                type: string
+                description: Full CREATE INDEX statement
+        constraints:
+          type: array
+          items:
+            type: object
+            required: [name, type, columns]
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+                description: Constraint type (PRIMARY KEY, UNIQUE, FOREIGN KEY, CHECK)
+              columns:
+                type: array
+                items:
+                  type: string
+
+    PgQueryResult:
+      type: object
+      required: [columns, rows, rowCount, truncated, durationMs]
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+          description: Column names from the result set
+        rows:
+          type: array
+          items:
+            type: object
+          description: Result rows (max 500)
+        rowCount:
+          type: integer
+          description: Total number of rows affected/returned
+        truncated:
+          type: boolean
+          description: Whether results were truncated at 500 rows
+        durationMs:
+          type: integer
+          description: Query execution time in milliseconds
+
+    MongoCollection:
+      type: object
+      required: [name, type, documentCount, sizeBytes, indexCount]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          description: Collection type (e.g. `collection`, `view`)
+        documentCount:
+          type: integer
+          description: Estimated document count
+        sizeBytes:
+          type: integer
+        indexCount:
+          type: integer
+
+    MongoIndex:
+      type: object
+      required: [name, key, unique, sparse]
+      properties:
+        name:
+          type: string
+        key:
+          type: object
+          additionalProperties:
+            type: integer
+            enum: [1, -1]
+          description: Index key specification
+        unique:
+          type: boolean
+        sparse:
+          type: boolean
+
+    MongoFindResult:
+      type: object
+      required: [documents, totalCount, durationMs]
+      properties:
+        documents:
+          type: array
+          items:
+            type: object
+          description: Matched documents
+        totalCount:
+          type: integer
+          description: Total number of documents matching the filter
+        durationMs:
+          type: integer
+          description: Query execution time in milliseconds
+
+    # --- Database Management Wrapped Response Types ---
+
+    ApiResponse_PgDatabaseList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PgDatabase"
+
+    ApiResponse_MongoDatabaseList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MongoDatabase"
+
+    ApiResponse_CreatedDatabase:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+
+    ApiResponse_DroppedName:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [dropped]
+          properties:
+            dropped:
+              type: string
+
+    ApiResponse_SchemaList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+
+    ApiResponse_PgTableList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PgTable"
+
+    ApiResponse_PgTableDetail:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PgTableDetail"
+
+    ApiResponse_CreatedTable:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [name, schema]
+          properties:
+            name:
+              type: string
+            schema:
+              type: string
+
+    ApiResponse_PgQueryResult:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PgQueryResult"
+
+    PgQueryErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Error code (`QUERY_ERROR`)
+            message:
+              type: string
+        data:
+          type: object
+          properties:
+            durationMs:
+              type: integer
+              description: Query execution time before failure
+
+    ApiResponse_MongoCollectionList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MongoCollection"
+
+    ApiResponse_MongoIndexList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MongoIndex"
+
+    ApiResponse_MongoSample:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+          description: Sample documents (up to 5)
+
+    ApiResponse_MongoFindResult:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/MongoFindResult"
+
+    MongoQueryErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Error code (`INVALID_FILTER`, `INVALID_SORT`, or `QUERY_ERROR`)
+            message:
+              type: string
+        data:
+          type: object
+          properties:
+            durationMs:
+              type: integer
+              description: Query execution time before failure

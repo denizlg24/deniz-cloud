@@ -8,6 +8,8 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { config } from "./config";
 import { authRoutes } from "./routes/auth";
+import { mongoDbRoutes } from "./routes/db-mongodb";
+import { postgresDbRoutes } from "./routes/db-postgres";
 import { projectRoutes } from "./routes/projects";
 import { statsRoutes } from "./routes/stats";
 import { userRoutes } from "./routes/users";
@@ -63,6 +65,11 @@ app.route("/api/stats", statsRoutes({ db }));
 app.use("/api/projects/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/projects/*", requireRole("superuser"));
 app.route("/api/projects", projectRoutes({ db, meiliClient, syncWorker }));
+
+app.use("/api/db/*", auth(db, config.jwtSecret, COOKIE_NAME));
+app.use("/api/db/*", requireRole("superuser"));
+app.route("/api/db/postgres", postgresDbRoutes({ db, databaseUrl: config.databaseUrl }));
+app.route("/api/db/mongodb", mongoDbRoutes({ mongoClient }));
 
 app.all("/api/*", (c) =>
   c.json({ error: { code: "NOT_FOUND", message: "Endpoint not found" } }, 404),
