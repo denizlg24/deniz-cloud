@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-denizcloud}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - ${POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
       - ./scripts/infra/postgres-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     command: >
       postgres
@@ -35,7 +35,7 @@ services:
       MONGO_SYNC_USER: ${MONGO_SYNC_USER:-sync_reader}
       MONGO_SYNC_PASSWORD: ${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
     volumes:
-      - ./data/mongo:/data/db
+      - ${MONGO_DATA_DIR:-./data/mongo}:/data/db
       - ./config/mongo/replica-keyfile:/data/replica-keyfile:ro
     entrypoint: ["/bin/bash", "-c", "cp /data/replica-keyfile /tmp/replica-keyfile && chmod 400 /tmp/replica-keyfile && chown 999:999 /tmp/replica-keyfile && exec docker-entrypoint.sh mongod --wiredTigerCacheSizeGB 0.25 --replSet rs0 --keyFile /tmp/replica-keyfile"]
     mem_limit: 400m
@@ -175,10 +175,11 @@ services:
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
       MEILI_URL: http://meilisearch:7700
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
-      MONGODB_URI: mongodb://${MONGO_SYNC_USER:-sync_reader}:${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}@mongodb:27017/?authSource=admin&replicaSet=rs0
+      MONGODB_URI: mongodb://${MONGO_SYNC_USER:-sync_reader}:${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}@mongodb:27017/?authSource=admin&directConnection=true
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
+      - ${SSD_MOUNT_PATH:-/mnt/ssd}:/mnt/ssd:ro
     depends_on:
       postgres:
         condition: service_healthy

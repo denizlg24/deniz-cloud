@@ -107,12 +107,14 @@ async function getDiskUsage(): Promise<
       output = execSync("df -B1 --output=source,size,used,avail", {
         encoding: "utf-8",
         timeout: 5000,
+        stdio: ["pipe", "pipe", "pipe"],
       });
     } catch {
       // BusyBox (Alpine): output in 1K blocks
       output = execSync("df -kP", {
         encoding: "utf-8",
         timeout: 5000,
+        stdio: ["pipe", "pipe", "pipe"],
       });
       multiplier = 1024;
     }
