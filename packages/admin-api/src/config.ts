@@ -9,4 +9,8 @@ export const config = {
   meiliMasterKey: requiredEnv("MEILI_MASTER_KEY"),
   mongodbUri: requiredEnv("MONGODB_URI"),
   mongodbAdminUri: requiredEnv("MONGODB_ADMIN_URI"),
+  postgresInternalHost: optionalEnv("POSTGRES_INTERNAL_HOST", "postgres:5432"),
+  postgresExternalHost: optionalEnv("POSTGRES_EXTERNAL_HOST", "postgres.denizlg24.com:5433"),
+  mongodbInternalHost: optionalEnv("MONGODB_INTERNAL_HOST", "mongodb:27017"),
+  mongodbExternalHost: optionalEnv("MONGODB_EXTERNAL_HOST", "mongodb.denizlg24.com:27018"),
 };

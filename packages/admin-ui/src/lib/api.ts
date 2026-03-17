@@ -625,6 +625,38 @@ export async function executePgQuery(database: string, sql: string): Promise<PgQ
   return res.data;
 }
 
+export interface ProjectDatabase {
+  id: string;
+  projectId: string;
+  type: "postgres" | "mongodb";
+  dbName: string;
+  username: string;
+  password: string;
+  uris: { internal: string; external: string };
+  createdAt: string;
+}
+
+export async function getProjectDatabases(projectId: string): Promise<ProjectDatabase[]> {
+  const res = await request<{ data: ProjectDatabase[] }>(`/projects/${projectId}/databases`);
+  return res.data;
+}
+
+export async function provisionDatabase(
+  projectId: string,
+  type: "postgres" | "mongodb",
+): Promise<ProjectDatabase> {
+  const res = await request<{ data: ProjectDatabase }>(`/projects/${projectId}/databases`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type }),
+  });
+  return res.data;
+}
+
+export async function deprovisionDatabase(projectId: string, dbId: string): Promise<void> {
+  await request(`/projects/${projectId}/databases/${dbId}`, { method: "DELETE" });
+}
+
 export interface MongoFindResult {
   documents: Record<string, unknown>[];
   totalCount: number;

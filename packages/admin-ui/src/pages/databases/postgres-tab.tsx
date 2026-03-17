@@ -163,8 +163,7 @@ export function PostgresTab() {
                 >
                   <ChevronRight
                     className={`h-3.5 w-3.5 shrink-0 transition-transform ${expandedDbs.has(db.name) ? "rotate-90" : ""}`}
-                  />
-                  {db.isProtected && <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />}
+                  />  
                   <span
                     className={`truncate ${selection.type !== "none" && "database" in selection && selection.database === db.name && selection.type === "database" ? "font-medium" : ""}`}
                   >
@@ -174,10 +173,11 @@ export function PostgresTab() {
                     {formatBytes(db.sizeBytes)}
                   </span>
                 </button>
+                {db.isProtected && <Lock className="m-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                 {!db.isProtected && (
                   <button
                     type="button"
-                    className="p-1 opacity-0 group-hover:opacity-100 hover:text-destructive"
+                    className="p-1 text-destructive"
                     onClick={() => setDropTarget({ type: "database", name: db.name })}
                   >
                     <Trash2 className="h-3.5 w-3.5" />

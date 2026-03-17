@@ -9,6 +9,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -135,6 +136,9 @@ export const apiKeys = pgTable(
 export const syncStatusEnum = pgEnum("sync_status", ["idle", "syncing", "error"]);
 export type SyncStatus = (typeof syncStatusEnum.enumValues)[number];
 
+export const dbTypeEnum = pgEnum("db_type", ["postgres", "mongodb"]);
+export type DbType = (typeof dbTypeEnum.enumValues)[number];
+
 export const projectCollections = pgTable(
   "project_collections",
   {
@@ -167,6 +171,27 @@ export interface FieldMapping {
   sortableAttributes?: string[];
   primaryKey?: string;
 }
+
+export const projectDatabases = pgTable(
+  "project_databases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    type: dbTypeEnum("type").notNull(),
+    dbName: varchar("db_name", { length: 255 }).notNull(),
+    username: varchar("username", { length: 255 }).notNull(),
+    encryptedPassword: text("encrypted_password").notNull(),
+    iv: text("iv").notNull(),
+    authTag: text("auth_tag").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("project_databases_project_id_idx").on(table.projectId),
+    uniqueIndex("project_databases_project_id_type_unique").on(table.projectId, table.type),
+  ],
+);
 
 export const folders = pgTable(
   "folders",
@@ -274,6 +299,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   }),
   apiKeys: many(apiKeys),
   collections: many(projectCollections),
+  databases: many(projectDatabases),
 }));
 
 export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
@@ -284,6 +310,13 @@ export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
 export const projectCollectionsRelations = relations(projectCollections, ({ one }) => ({
   project: one(projects, {
     fields: [projectCollections.projectId],
+    references: [projects.id],
+  }),
+}));
+
+export const projectDatabasesRelations = relations(projectDatabases, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectDatabases.projectId],
     references: [projects.id],
   }),
 }));
@@ -328,6 +361,9 @@ export type NewApiKey = InferInsertModel<typeof apiKeys>;
 
 export type ProjectCollection = InferSelectModel<typeof projectCollections>;
 export type NewProjectCollection = InferInsertModel<typeof projectCollections>;
+
+export type ProjectDatabase = InferSelectModel<typeof projectDatabases>;
+export type NewProjectDatabase = InferInsertModel<typeof projectDatabases>;
 
 export type Folder = InferSelectModel<typeof folders>;
 export type NewFolder = InferInsertModel<typeof folders>;

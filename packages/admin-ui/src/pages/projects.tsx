@@ -4,6 +4,8 @@ import {
   Check,
   Copy,
   Database,
+  Eye,
+  EyeOff,
   FolderOpen,
   Key,
   Loader2,
@@ -64,12 +66,16 @@ import {
   type DiscoveredField,
   deleteCollectionApi,
   deleteProject,
+  deprovisionDatabase,
   discoverFields,
   getApiKeys,
   getCollections,
+  getProjectDatabases,
   getProjects,
   type Project,
   type ProjectCollection,
+  type ProjectDatabase,
+  provisionDatabase,
   resyncCollection,
   revokeApiKey,
   updateCollectionApi,
@@ -320,12 +326,15 @@ function SyncStatusBadge({ status, error }: { status: string; error: string | nu
 function ProjectDetailView({ project, onBack }: { project: Project; onBack: () => void }) {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [collections, setCollections] = useState<ProjectCollection[]>([]);
+  const [databases, setDatabases] = useState<ProjectDatabase[]>([]);
   const [loading, setLoading] = useState(true);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
+  const [databasesLoading, setDatabasesLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [createCollOpen, setCreateCollOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null);
   const [deleteCollTarget, setDeleteCollTarget] = useState<ProjectCollection | null>(null);
+  const [deprovisionTarget, setDeprovisionTarget] = useState<ProjectDatabase | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
 
   const refreshKeys = useCallback(async () => {
@@ -350,10 +359,22 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
     }
   }, [project.id]);
 
+  const refreshDatabases = useCallback(async () => {
+    try {
+      const dbs = await getProjectDatabases(project.id);
+      setDatabases(dbs);
+    } catch {
+      toast.error("Failed to load databases");
+    } finally {
+      setDatabasesLoading(false);
+    }
+  }, [project.id]);
+
   useEffect(() => {
     refreshKeys();
     refreshCollections();
-  }, [refreshKeys, refreshCollections]);
+    refreshDatabases();
+  }, [refreshKeys, refreshCollections, refreshDatabases]);
 
   async function handleRevoke() {
     if (!revokeTarget) return;
@@ -400,6 +421,18 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
       refreshCollections();
     } catch {
       toast.error("Failed to toggle sync");
+    }
+  }
+
+  async function handleDeprovision() {
+    if (!deprovisionTarget) return;
+    try {
+      await deprovisionDatabase(project.id, deprovisionTarget.id);
+      toast.success(`Deprovisioned ${deprovisionTarget.type} database`);
+      setDeprovisionTarget(null);
+      refreshDatabases();
+    } catch {
+      toast.error("Failed to deprovision database");
     }
   }
 
@@ -682,6 +715,35 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
         )}
       </div>
 
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-medium flex items-center gap-2">
+            <Database className="h-4 w-4" />
+            Databases
+          </h2>
+          <Button variant="ghost" size="icon" onClick={refreshDatabases}>
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {databasesLoading ? (
+          <Skeleton className="h-32" />
+        ) : (
+          <div className="space-y-3">
+            {(["postgres", "mongodb"] as const).map((type) => (
+              <DatabaseCard
+                key={type}
+                type={type}
+                database={databases.find((d) => d.type === type) ?? null}
+                projectId={project.id}
+                onProvisioned={refreshDatabases}
+                onDeprovision={setDeprovisionTarget}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
       <AlertDialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -723,6 +785,32 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!deprovisionTarget}
+        onOpenChange={(open) => !open && setDeprovisionTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deprovision database</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently drop the{" "}
+              <strong>{deprovisionTarget?.type === "postgres" ? "PostgreSQL" : "MongoDB"}</strong>{" "}
+              database <code>{deprovisionTarget?.dbName}</code> and its user. All data will be lost.
+              This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeprovision}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Deprovision
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -972,6 +1060,133 @@ function CreateApiKeyDialog({
         </DialogFooter>
       </form>
     </DialogContent>
+  );
+}
+
+function DatabaseCard({
+  type,
+  database,
+  projectId,
+  onProvisioned,
+  onDeprovision,
+}: {
+  type: "postgres" | "mongodb";
+  database: ProjectDatabase | null;
+  projectId: string;
+  onProvisioned: () => void;
+  onDeprovision: (db: ProjectDatabase) => void;
+}) {
+  const [provisioning, setProvisioning] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const label = type === "postgres" ? "PostgreSQL" : "MongoDB";
+
+  async function handleProvision() {
+    setProvisioning(true);
+    try {
+      await provisionDatabase(projectId, type);
+      toast.success(`Provisioned ${label} database`);
+      onProvisioned();
+    } catch {
+      toast.error(`Failed to provision ${label} database`);
+    } finally {
+      setProvisioning(false);
+    }
+  }
+
+  async function copy(value: string, key: string) {
+    await navigator.clipboard.writeText(value);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  }
+
+  return (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Database className="h-4 w-4 text-muted-foreground" />
+          <span className="font-medium text-sm">{label}</span>
+          {database && (
+            <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{database.dbName}</code>
+          )}
+        </div>
+        {database ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            onClick={() => onDeprovision(database)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={handleProvision} disabled={provisioning}>
+            {provisioning ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                Provisioning...
+              </>
+            ) : (
+              <>
+                <Plus className="h-4 w-4 mr-1" />
+                Provision
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+
+      {database && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground w-16 shrink-0">Password</span>
+            <code className="flex-1 text-xs bg-muted px-2 py-1 rounded font-mono overflow-hidden">
+              {showPassword ? database.password : "••••••••••••••••••••••••••••••••"}
+            </code>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              onClick={() => setShowPassword((v) => !v)}
+            >
+              {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+
+          {(["internal", "external"] as const).map((uriType) => (
+            <div key={uriType} className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground w-16 shrink-0 capitalize">
+                {uriType}
+              </span>
+              <code className="flex-1 text-xs bg-muted px-2 py-1 rounded font-mono truncate">
+                {database.uris[uriType]}
+              </code>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => copy(database.uris[uriType], `${uriType}-${type}`)}
+              >
+                {copiedKey === `${uriType}-${type}` ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
+          ))}
+
+          <p className="text-xs text-muted-foreground">Provisioned {formatDate(database.createdAt)}</p>
+        </div>
+      )}
+
+      {!database && (
+        <p className="text-xs text-muted-foreground">
+          No {label} database provisioned for this project.
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -1,16 +1,17 @@
 import { createDb } from "@deniz-cloud/shared/db";
 import { auth, requireRole } from "@deniz-cloud/shared/middleware";
 import { closeMongoClient, createMongoClient } from "@deniz-cloud/shared/mongo";
-import { MongoClient } from "mongodb";
 import { createMeiliClient } from "@deniz-cloud/shared/search";
 import { AuthError } from "@deniz-cloud/shared/services";
 import { SyncWorker } from "@deniz-cloud/shared/sync";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import { MongoClient } from "mongodb";
 import { config } from "./config";
 import { authRoutes } from "./routes/auth";
 import { mongoDbRoutes } from "./routes/db-mongodb";
 import { postgresDbRoutes } from "./routes/db-postgres";
+import { projectDatabaseRoutes } from "./routes/project-databases";
 import { projectRoutes } from "./routes/projects";
 import { statsRoutes } from "./routes/stats";
 import { userRoutes } from "./routes/users";
@@ -70,6 +71,20 @@ app.route("/api/stats", statsRoutes({ db }));
 app.use("/api/projects/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/projects/*", requireRole("superuser"));
 app.route("/api/projects", projectRoutes({ db, meiliClient, syncWorker }));
+
+app.route(
+  "/api/projects",
+  projectDatabaseRoutes({
+    db,
+    databaseUrl: config.databaseUrl,
+    mongoAdminClient,
+    totpEncryptionKey: config.totpEncryptionKey,
+    postgresInternalHost: config.postgresInternalHost,
+    postgresExternalHost: config.postgresExternalHost,
+    mongodbInternalHost: config.mongodbInternalHost,
+    mongodbExternalHost: config.mongodbExternalHost,
+  }),
+);
 
 app.use("/api/db/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/db/*", requireRole("superuser"));
