@@ -1177,7 +1177,9 @@ function DatabaseCard({
             </div>
           ))}
 
-          <p className="text-xs text-muted-foreground">Provisioned {formatDate(database.createdAt)}</p>
+          <p className="text-xs text-muted-foreground">
+            Provisioned {formatDate(database.createdAt)}
+          </p>
         </div>
       )}
 

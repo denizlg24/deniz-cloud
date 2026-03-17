@@ -1,10 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { decryptTotpSecret, encryptTotpSecret } from "@deniz-cloud/shared/auth";
 import { createRawClient, type Database, projectDatabases, projects } from "@deniz-cloud/shared/db";
 import type { AuthVariables } from "@deniz-cloud/shared/middleware";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { MongoClient } from "mongodb";
-import { randomBytes } from "node:crypto";
 
 interface ProjectDatabaseRouteDeps {
   db: Database;
@@ -69,14 +69,13 @@ export function projectDatabaseRoutes({
     const { type } = body;
 
     if (type !== "postgres" && type !== "mongodb") {
-      return c.json({ error: { code: "INVALID_INPUT", message: "type must be postgres or mongodb" } }, 400);
+      return c.json(
+        { error: { code: "INVALID_INPUT", message: "type must be postgres or mongodb" } },
+        400,
+      );
     }
 
-    const [project] = await db
-      .select()
-      .from(projects)
-      .where(eq(projects.id, projectId))
-      .limit(1);
+    const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
     if (!project) {
       return c.json({ error: { code: "NOT_FOUND", message: "Project not found" } }, 404);
     }
@@ -88,7 +87,12 @@ export function projectDatabaseRoutes({
       .limit(1);
     if (existing.length > 0) {
       return c.json(
-        { error: { code: "CONFLICT", message: `A ${type} database already exists for this project` } },
+        {
+          error: {
+            code: "CONFLICT",
+            message: `A ${type} database already exists for this project`,
+          },
+        },
         409,
       );
     }
@@ -108,10 +112,16 @@ export function projectDatabaseRoutes({
         await sql.end();
       }
     } else {
-      await mongoAdminClient.db(identifier).command({
+      const mongoDB = mongoAdminClient.db(identifier);
+      await mongoDB.command({
         createUser: identifier,
         pwd: password,
         roles: [{ role: "dbOwner", db: identifier }],
+      });
+      await mongoDB.collection("_meta").insertOne({
+        createdAt: new Date(),
+        projectId,
+        projectSlug: project.slug,
       });
     }
 
