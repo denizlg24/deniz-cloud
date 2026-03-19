@@ -43,10 +43,7 @@ export async function deleteProjectSearchKey(
 
 export type TenantSearchRules = Record<string, { filter?: string } | null>;
 
-export function validateSearchRules(
-  rules: TenantSearchRules,
-  projectName: string,
-): string | null {
+export function validateSearchRules(rules: TenantSearchRules, projectName: string): string | null {
   const prefix = `${projectName}_`;
   const wildcard = `${projectName}_*`;
   for (const indexPattern of Object.keys(rules)) {

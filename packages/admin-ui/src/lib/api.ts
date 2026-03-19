@@ -370,14 +370,11 @@ export async function generateSearchToken(
   projectId: string,
   input: { expiresInHours?: number; searchRules?: SearchRules },
 ): Promise<SearchTokenResult> {
-  const res = await request<{ data: SearchTokenResult }>(
-    `/projects/${projectId}/search-token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    },
-  );
+  const res = await request<{ data: SearchTokenResult }>(`/projects/${projectId}/search-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
   return res.data;
 }
 

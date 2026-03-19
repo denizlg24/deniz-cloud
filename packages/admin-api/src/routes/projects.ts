@@ -580,14 +580,15 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
         : 24;
 
     let searchRules: TenantSearchRules | undefined;
-    if (body.searchRules && typeof body.searchRules === "object" && !Array.isArray(body.searchRules)) {
+    if (
+      body.searchRules &&
+      typeof body.searchRules === "object" &&
+      !Array.isArray(body.searchRules)
+    ) {
       searchRules = body.searchRules as TenantSearchRules;
       const validationError = validateSearchRules(searchRules, project.slug);
       if (validationError) {
-        return c.json(
-          { error: { code: "INVALID_SEARCH_RULES", message: validationError } },
-          400,
-        );
+        return c.json({ error: { code: "INVALID_SEARCH_RULES", message: validationError } }, 400);
       }
     }
 

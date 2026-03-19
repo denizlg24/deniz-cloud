@@ -234,19 +234,13 @@ describe("validateSearchRules", () => {
   });
 
   it("returns error for indexes outside project scope", () => {
-    const result = validateSearchRules(
-      { other_project_users: { filter: "id = 1" } },
-      "myapp",
-    );
+    const result = validateSearchRules({ other_project_users: { filter: "id = 1" } }, "myapp");
     expect(result).toContain("outside project scope");
     expect(result).toContain("other_project_users");
   });
 
   it("returns error when mixing valid and invalid indexes", () => {
-    const result = validateSearchRules(
-      { myapp_users: null, foreign_index: null },
-      "myapp",
-    );
+    const result = validateSearchRules({ myapp_users: null, foreign_index: null }, "myapp");
     expect(result).toContain("foreign_index");
   });
 

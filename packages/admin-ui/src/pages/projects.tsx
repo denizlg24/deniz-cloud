@@ -731,10 +731,7 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
             Meilisearch
           </h2>
           {project.meiliApiKey && (
-            <Dialog
-              open={tokenDialogOpen}
-              onOpenChange={setTokenDialogOpen}
-            >
+            <Dialog open={tokenDialogOpen} onOpenChange={setTokenDialogOpen}>
               <DialogTrigger asChild>
                 <Button size="sm" variant="outline">
                   <Key className="h-4 w-4 mr-1" />
@@ -1468,7 +1465,9 @@ function MeiliApiKeyDisplay({ apiKey, projectSlug }: { apiKey: string; projectSl
     <div className="rounded-lg border p-4 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">Project API Key</span>
-        <Badge variant="secondary" className="text-[10px]">{projectSlug}_*</Badge>
+        <Badge variant="secondary" className="text-[10px]">
+          {projectSlug}_*
+        </Badge>
       </div>
       <div className="flex items-center gap-2">
         <code className="flex-1 text-xs bg-muted px-2 py-1.5 rounded font-mono overflow-hidden">
@@ -1482,12 +1481,7 @@ function MeiliApiKeyDisplay({ apiKey, projectSlug }: { apiKey: string; projectSl
         >
           {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 shrink-0"
-          onClick={handleCopy}
-        >
+        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleCopy}>
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
         </Button>
       </div>
@@ -1541,9 +1535,7 @@ function GenerateSearchTokenDialog({
       if (useCustomRules && indexRules.length > 0) {
         searchRules = {};
         for (const rule of indexRules) {
-          searchRules[rule.index] = rule.filter.trim()
-            ? { filter: rule.filter.trim() }
-            : null;
+          searchRules[rule.index] = rule.filter.trim() ? { filter: rule.filter.trim() } : null;
         }
       }
 
@@ -1589,14 +1581,12 @@ function GenerateSearchTokenDialog({
             </Button>
           </div>
           {expiresAt && (
-            <p className="text-xs text-muted-foreground">
-              Expires: {formatDate(expiresAt)}
-            </p>
+            <p className="text-xs text-muted-foreground">Expires: {formatDate(expiresAt)}</p>
           )}
           <div className="border rounded-lg p-3 bg-muted/50 space-y-1.5">
             <p className="text-xs font-medium">Usage</p>
             <pre className="text-xs font-mono overflow-x-auto">
-{`import { MeiliSearch } from 'meilisearch'
+              {`import { MeiliSearch } from 'meilisearch'
 
 const client = new MeiliSearch({
   host: 'https://search.denizlg24.com',
@@ -1670,10 +1660,7 @@ const results = await client
                 // biome-ignore lint/suspicious/noArrayIndexKey: stable within dialog lifetime
                 <div key={idx} className="flex items-start gap-2">
                   <div className="flex-1 space-y-1.5">
-                    <Select
-                      value={rule.index}
-                      onValueChange={(v) => updateRule(idx, "index", v)}
-                    >
+                    <Select value={rule.index} onValueChange={(v) => updateRule(idx, "index", v)}>
                       <SelectTrigger className="h-8 text-xs">
                         <SelectValue />
                       </SelectTrigger>

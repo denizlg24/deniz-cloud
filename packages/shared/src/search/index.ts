@@ -11,6 +11,6 @@ export {
   createProjectSearchKey,
   deleteProjectSearchKey,
   generateProjectToken,
-  validateSearchRules,
   type TenantSearchRules,
+  validateSearchRules,
 } from "./tokens";
