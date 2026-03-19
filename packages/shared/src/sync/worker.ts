@@ -219,9 +219,11 @@ export class SyncWorker {
       const index = this.meili.index(collection.meiliIndexUid);
 
       try {
-        await this.meili.createIndex(collection.meiliIndexUid, {
-          primaryKey: "id",
-        });
+        await this.meili
+          .createIndex(collection.meiliIndexUid, {
+            primaryKey: "id",
+          })
+          .waitTask();
         await this.meili.index(collection.meiliIndexUid).updateSettings({
           searchableAttributes: collection.fieldMapping.searchableAttributes ?? ["*"],
           filterableAttributes: collection.fieldMapping.filterableAttributes ?? [],

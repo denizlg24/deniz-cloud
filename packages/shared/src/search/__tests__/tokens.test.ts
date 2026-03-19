@@ -4,7 +4,7 @@ import type { MeiliSearch } from "meilisearch";
 import { createProjectSearchKey, deleteProjectSearchKey, generateProjectToken } from "../tokens";
 
 describe("createProjectSearchKey", () => {
-  it("creates a key scoped to the project prefix with search-only permissions", async () => {
+  it("creates a key scoped to the project prefix with full index/document actions", async () => {
     const mockClient = {
       createKey: mock<MeiliSearch["createKey"]>(async (params) => ({
         key: "generated-key-abc",
@@ -25,7 +25,16 @@ describe("createProjectSearchKey", () => {
     expect(result.uid).toBe("uid-123");
     // biome-ignore lint/style/noNonNullAssertion: Testing description generation logic
     const call = mockClient.createKey.mock.calls[0]!;
-    expect(call[0].actions).toEqual(["search"]);
+    expect(call[0].actions).toContain("search");
+    expect(call[0].actions).toContain("documents.add");
+    expect(call[0].actions).toContain("documents.get");
+    expect(call[0].actions).toContain("documents.delete");
+    expect(call[0].actions).toContain("indexes.create");
+    expect(call[0].actions).toContain("indexes.delete");
+    expect(call[0].actions).toContain("settings.update");
+    expect(call[0].actions).not.toContain("keys.create");
+    expect(call[0].actions).not.toContain("keys.delete");
+    expect(call[0].actions).not.toContain("dumps.create");
     expect(call[0].indexes).toEqual(["my-project_*"]);
     expect(call[0].expiresAt).toBeNull();
     expect(call[0].description).toContain("my-project");

@@ -314,7 +314,7 @@ function TableDescription({
 
       <div>
         <h3 className="text-sm font-medium mb-2">Columns</h3>
-        <div className="border rounded-lg">
+        <div className="border rounded-lg overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -357,7 +357,7 @@ function TableDescription({
       {detail.indexes.length > 0 && (
         <div>
           <h3 className="text-sm font-medium mb-2">Indexes</h3>
-          <div className="border rounded-lg">
+          <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -368,7 +368,9 @@ function TableDescription({
               <TableBody>
                 {detail.indexes.map((idx) => (
                   <TableRow key={idx.name}>
-                    <TableCell className="font-mono text-sm">{idx.name}</TableCell>
+                    <TableCell className="font-mono text-sm max-w-[200px] truncate">
+                      {idx.name}
+                    </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground max-w-md truncate">
                       {idx.definition}
                     </TableCell>
@@ -383,7 +385,7 @@ function TableDescription({
       {detail.constraints.length > 0 && (
         <div>
           <h3 className="text-sm font-medium mb-2">Constraints</h3>
-          <div className="border rounded-lg">
+          <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -395,13 +397,17 @@ function TableDescription({
               <TableBody>
                 {detail.constraints.map((con) => (
                   <TableRow key={con.name}>
-                    <TableCell className="font-mono text-sm">{con.name}</TableCell>
+                    <TableCell className="font-mono text-sm max-w-[200px] truncate">
+                      {con.name}
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-xs">
                         {con.type}
                       </Badge>
                     </TableCell>
-                    <TableCell className="font-mono text-sm">{con.columns.join(", ")}</TableCell>
+                    <TableCell className="font-mono text-sm max-w-[200px] truncate">
+                      {con.columns.join(", ")}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -103,7 +103,7 @@ export function FileBrowser() {
     }
 
     buildBreadcrumbs();
-  }, [contents, contents?.folder.id, roots, setActiveRoot]);
+  }, [contents, roots, setActiveRoot]);
 
   const navigateToFolder = useCallback(
     (targetFolderId: string) => {

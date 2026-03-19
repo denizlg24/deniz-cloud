@@ -1,6 +1,6 @@
 import type { Database } from "@deniz-cloud/shared/db";
 import { projects } from "@deniz-cloud/shared/db/schema";
-import type { AuthVariables } from "@deniz-cloud/shared/middleware";
+import { type AuthVariables, requireScope } from "@deniz-cloud/shared/middleware";
 import {
   createProjectSearchKey,
   deleteAllProjectIndexes,
@@ -261,14 +261,14 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
     return c.json({ data: { success: true } });
   });
 
-  app.get("/:id/collections", async (c) => {
+  app.get("/:id/collections", requireScope("search:read"), async (c) => {
     const projectId = c.req.param("id");
     await getProject(db, projectId);
     const collections = await listCollections(db, projectId);
     return c.json({ data: collections });
   });
 
-  app.post("/:id/collections", async (c) => {
+  app.post("/:id/collections", requireScope("search:manage"), async (c) => {
     const project = await getProject(db, c.req.param("id"));
     const body = await c.req.json();
 
@@ -361,7 +361,7 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
     return c.json({ data: collection });
   });
 
-  app.patch("/:id/collections/:cid", async (c) => {
+  app.patch("/:id/collections/:cid", requireScope("search:manage"), async (c) => {
     const projectId = c.req.param("id");
     await getProject(db, projectId);
     const collectionId = c.req.param("cid");
@@ -438,7 +438,7 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
     return c.json({ data: updated });
   });
 
-  app.delete("/:id/collections/:cid", async (c) => {
+  app.delete("/:id/collections/:cid", requireScope("search:manage"), async (c) => {
     const projectId = c.req.param("id");
     await getProject(db, projectId);
     const collectionId = c.req.param("cid");
@@ -459,7 +459,7 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
     await syncWorker.removeCollection(collectionId);
 
     try {
-      await meiliClient.deleteIndex(collection.meiliIndexUid);
+      await meiliClient.deleteIndex(collection.meiliIndexUid).waitTask();
     } catch {
       // index may not exist
     }
@@ -468,7 +468,7 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
     return c.json({ data: { success: true } });
   });
 
-  app.post("/:id/collections/:cid/resync", async (c) => {
+  app.post("/:id/collections/:cid/resync", requireScope("search:manage"), async (c) => {
     const projectId = c.req.param("id");
     await getProject(db, projectId);
     const collectionId = c.req.param("cid");
@@ -495,7 +495,7 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
     }
   });
 
-  app.post("/:id/collections/discover-fields", async (c) => {
+  app.post("/:id/collections/discover-fields", requireScope("search:read"), async (c) => {
     const body = await c.req.json();
 
     if (typeof body.mongoDatabase !== "string" || body.mongoDatabase.trim().length === 0) {
@@ -556,7 +556,7 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
     }
   });
 
-  app.post("/:id/search-token", async (c) => {
+  app.post("/:id/search-token", requireScope("search:read"), async (c) => {
     const project = await getProject(db, c.req.param("id"));
 
     if (!project.meiliApiKey || !project.meiliApiKeyUid) {

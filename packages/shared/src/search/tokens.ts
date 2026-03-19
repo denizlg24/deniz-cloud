@@ -3,13 +3,31 @@ import { generateTenantToken } from "meilisearch/token";
 
 const DEFAULT_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+const PROJECT_KEY_ACTIONS = [
+  "search",
+  "documents.add",
+  "documents.get",
+  "documents.delete",
+  "indexes.create",
+  "indexes.get",
+  "indexes.update",
+  "indexes.delete",
+  "settings.get",
+  "settings.update",
+  "stats.get",
+  "tasks.get",
+  "tasks.cancel",
+  "tasks.delete",
+  "version",
+] as const;
+
 export async function createProjectSearchKey(
   client: Pick<MeiliSearch, "createKey">,
   projectName: string,
 ): Promise<{ key: string; uid: string }> {
   const result = await client.createKey({
-    description: `Search key for project: ${projectName}`,
-    actions: ["search"],
+    description: `Project API key for: ${projectName}`,
+    actions: [...PROJECT_KEY_ACTIONS],
     indexes: [`${projectName}_*`],
     expiresAt: null,
   });

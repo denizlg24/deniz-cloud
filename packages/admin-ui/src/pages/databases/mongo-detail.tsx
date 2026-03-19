@@ -96,7 +96,7 @@ function MongoDatabaseOverview({ database }: { database: string }) {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 min-w-0">
       <div>
         <h2 className="text-lg font-semibold">{database}</h2>
         <p className="text-sm text-muted-foreground">MongoDB Database</p>
@@ -124,7 +124,7 @@ function MongoDatabaseOverview({ database }: { database: string }) {
       {collections.length > 0 && (
         <div>
           <h3 className="text-sm font-medium mb-2">Collections</h3>
-          <div className="border rounded-lg">
+          <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -137,7 +137,9 @@ function MongoDatabaseOverview({ database }: { database: string }) {
               <TableBody>
                 {collections.map((col) => (
                   <TableRow key={col.name}>
-                    <TableCell className="font-mono text-sm">{col.name}</TableCell>
+                    <TableCell className="font-mono text-sm max-w-[200px] truncate">
+                      {col.name}
+                    </TableCell>
                     <TableCell>{col.documentCount.toLocaleString()}</TableCell>
                     <TableCell>{formatBytes(col.sizeBytes)}</TableCell>
                     <TableCell>{col.indexCount}</TableCell>
@@ -216,7 +218,7 @@ function MongoCollectionDetail({
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 min-w-0">
       <div>
         <h2 className="text-lg font-semibold">{collection}</h2>
         <p className="text-sm text-muted-foreground">
@@ -232,7 +234,7 @@ function MongoCollectionDetail({
             Create Index
           </Button>
         </div>
-        <div className="border rounded-lg">
+        <div className="border rounded-lg overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -245,8 +247,10 @@ function MongoCollectionDetail({
             <TableBody>
               {indexes.map((idx) => (
                 <TableRow key={idx.name}>
-                  <TableCell className="font-mono text-sm">{idx.name}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
+                  <TableCell className="font-mono text-sm max-w-[200px] truncate">
+                    {idx.name}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground max-w-[200px] truncate">
                     {Object.entries(idx.key)
                       .map(([k, v]) => `${k}: ${v}`)
                       .join(", ")}
@@ -294,7 +298,7 @@ function MongoCollectionDetail({
       {sample.length > 0 && (
         <div>
           <h3 className="text-sm font-medium mb-2">Sample Documents ({sample.length})</h3>
-          <div className="space-y-2">
+          <div className="space-y-2" style={{ width: 0, minWidth: "100%" }}>
             {sample.map((doc, i) => (
               <pre
                 // biome-ignore lint/suspicious/noArrayIndexKey: can;t know unique id for sample documents
@@ -377,7 +381,7 @@ function MongoFindPanel({ database, collection }: { database: string; collection
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 min-w-0">
       <h3 className="text-sm font-medium flex items-center gap-1.5">
         <Search className="h-3.5 w-3.5" />
         Find Documents
@@ -484,7 +488,7 @@ function MongoFindPanel({ database, collection }: { database: string; collection
               </Button>
             </div>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2" style={{ width: 0, minWidth: "100%" }}>
             {result.documents.map((doc, i) => (
               <pre
                 // biome-ignore lint/suspicious/noArrayIndexKey: can;t know unique id for sample documents

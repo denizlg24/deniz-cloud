@@ -290,8 +290,8 @@ export function MongoTab() {
 
   return (
     <>
-      <div className="flex gap-4 h-[calc(100vh-16rem)]">
-        <div className="hidden md:flex w-72 border rounded-lg flex-col">{treeContent}</div>
+      <div className="flex gap-4 h-[calc(100vh-16rem)] overflow-hidden">
+        <div className="hidden md:flex w-72 shrink-0 border rounded-lg flex-col">{treeContent}</div>
 
         <Sheet open={mobileTreeOpen} onOpenChange={setMobileTreeOpen}>
           <SheetContent side="left" className="w-72 p-0 flex flex-col">
@@ -303,7 +303,7 @@ export function MongoTab() {
           </SheetContent>
         </Sheet>
 
-        <div className="flex-1 border rounded-lg overflow-auto flex flex-col">
+        <div className="flex-1 min-w-0 border rounded-lg overflow-hidden flex flex-col">
           <div className="md:hidden flex items-center gap-2 p-2 border-b">
             <Button
               variant="ghost"
@@ -321,7 +321,7 @@ export function MongoTab() {
                   : `${selection.database} / ${selection.collection}`}
             </span>
           </div>
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 min-w-0 min-h-0 overflow-auto">
             <MongoDetail
               selection={selection}
               onCreateIndex={(database, collection) =>

@@ -42,8 +42,9 @@ deniz-cloud/
 │   │   │   ├── auth/          # Crypto primitives (password, TOTP, JWT, recovery codes)
 │   │   │   ├── db/            # Drizzle schema (6 tables) + postgres.js connection
 │   │   │   ├── search/        # Meilisearch client, index management, tenant tokens
+│   │   │   ├── sync/          # MongoDB→Meilisearch sync worker (change streams, batching)
 │   │   │   ├── services/      # Auth service layer (register, login, sessions, API keys, user CRUD)
-│   │   │   ├── middleware/     # Hono auth middleware (session + API key, role guard, rate limiting)
+│   │   │   ├── middleware/     # Hono auth middleware (session + API key, role guard, rate limiting, scope enforcement)
 │   │   │   ├── types/         # API-facing types (SafeUser, ApiResponse, etc.)
 │   │   │   └── env.ts         # Environment variable helpers
 │   │   └── drizzle.config.ts
@@ -55,7 +56,8 @@ deniz-cloud/
 │   │   │   │   ├── auth.ts    # Login (password+TOTP), logout, me
 │   │   │   │   ├── users.ts   # User CRUD (list, create pending, delete, reset MFA)
 │   │   │   │   ├── stats.ts   # System stats (CPU, RAM, disk) + storage stats
-│   │   │   │   └── search.ts  # Search project/collection CRUD, tenant tokens
+│   │   │   │   ├── search.ts  # Search project/collection CRUD, tenant tokens (deprecated)
+│   │   │   │   └── projects.ts # Project CRUD, API keys, collections, search tokens, DB provisioning
 │   │   │   ├── config.ts      # Env config
 │   │   │   ├── index.ts       # App wiring, error handler
 │   │   │   └── seed.ts        # Interactive superuser setup CLI
@@ -83,6 +85,8 @@ Each API serves its paired UI as static files = only 2 server processes total.
 | `@deniz-cloud/shared/search` | `createMeiliClient`, index CRUD, `generateProjectToken` |
 | `@deniz-cloud/shared/types` | `SafeUser`, `SafeProject`, `SafeApiKey`, `ApiKeyScope`, `API_KEY_SCOPES`, `ApiResponse<T>`, `PaginatedResponse<T>`, etc. |
 | `@deniz-cloud/shared/env` | `requiredEnv()`, `optionalEnv()` |
+| `@deniz-cloud/shared/sync` | `SyncWorker` — MongoDB→Meilisearch change stream sync |
+| `@deniz-cloud/shared/mongo` | `getMongoClient()` — MongoDB client singleton |
 
 ## Key Design Decisions
 
@@ -97,7 +101,9 @@ Each API serves its paired UI as static files = only 2 server processes total.
 - **Pending user signup**: Admin creates username → user completes signup on storage-ui (email, password, mandatory TOTP). Status enum (`pending` | `active`), `passwordHash` nullable until signup completed
 - **Rate limiting**: In-memory per-IP sliding window (`CF-Connecting-IP` → `X-Forwarded-For` → `X-Real-IP`). Applied to login (10/15min) and complete-signup (5/15min). Generic errors on signup to prevent username enumeration
 - **Share links**: Stateless HMAC-signed tokens (fileId:expiresAt), no DB state. Configurable expiration (30m, 1d, 7d, 30d, never)
-- **Projects**: Unified entity for programmatic access — each project has a private storage folder, scoped API keys (with rotation support), and will have MongoDB→Meilisearch collection sync. API keys carry `scopes` (jsonb) enforced via `requireScope()` middleware; session auth bypasses scopes (full access)
+- **Projects**: Unified entity for programmatic access — each project has a private storage folder, scoped API keys (with rotation support), and MongoDB→Meilisearch collection sync. API keys carry `scopes` (jsonb) enforced via `requireScope()` middleware on all search and collection endpoints; session auth bypasses scopes (full access)
+- **Meilisearch async operations**: All index create/delete operations use `.waitTask()` to ensure task completion before returning, preventing state corruption from concurrent operations
+- **Database provisioning**: Per-project PostgreSQL and MongoDB databases provisioned on demand with auto-generated credentials
 
 ## Docker Memory Budget
 
@@ -121,7 +127,7 @@ Total ~1.45GB for containers, ~2.55GB for OS/cache/host services (cloudflared ru
 - [x] Search scoping API in admin-api — project/collection CRUD, tenant token issuance (7 endpoints)
 - [x] Admin-api auth routes — login, logout, me
 - [x] Superuser seed CLI (`bun run seed:admin` in admin-api)
-- [x] Unit tests (40 passing) — password, TOTP, JWT, recovery codes, search indexes, env
+- [x] Unit tests (723 passing across 41 files) — auth, middleware (scope, rate-limit, cookie), search (indexes, tokens, async ops), services (projects, collections), routes (auth, stats, users, projects), env, types
 
 ### Phase 2: Storage Service — COMPLETE
 - [x] Storage API (Hono): TUS resumable upload, download (with HTTP Range support), delete, rename, move, folder CRUD
@@ -167,13 +173,17 @@ Total ~1.45GB for containers, ~2.55GB for OS/cache/host services (cloudflared ru
 - [x] Storage API: project folder isolation — `checkProjectScope()` utility enforces path prefix + scope on every route handler; API key auth replaces ownership checks with project path boundary; `GET /roots` returns project folder for API key auth
 - [x] Search migrated into project model — `projects` table has nullable `meili_api_key_uid`/`meili_api_key`; search collection CRUD + tenant token endpoints under `/api/projects/:id/search-collections` and `/api/projects/:id/search-token`; auto-creates Meilisearch API key on first collection; old `/api/search` routes kept but deprecated
 
-### Phase 5: MongoDB ↔ Meilisearch Sync — PLANNED
-- See `docs/phase3-mongodb-meilisearch-sync.md` for full design
-- `project_collections` table linking MongoDB collections to Meilisearch indexes
-- Change stream-based incremental sync with resume tokens
-- Embedded sync worker in admin-api (RAM-constrained)
-- Field mapping config (searchable, filterable, sortable attributes)
-- Admin UI: collection management in project detail view
+### Phase 5: MongoDB ↔ Meilisearch Sync — COMPLETE
+- [x] `project_collections` table linking MongoDB collections to Meilisearch indexes
+- [x] Change stream-based incremental sync with resume tokens
+- [x] Embedded sync worker in admin-api (RAM-constrained, batched updates)
+- [x] Field mapping config (searchable, filterable, sortable attributes)
+- [x] Admin UI: collection management in project detail view (create, delete, resync, pause/resume, field discovery)
+- [x] Meilisearch API key provisioning per project (lazy-created on first collection, scoped to `{slug}_*`)
+- [x] Tenant token generation for client-side search (ephemeral JWTs, configurable TTL up to 30 days)
+- [x] Search scope enforcement on all collection/search-token endpoints (`search:read`, `search:manage`)
+- [x] Async task completion — all Meilisearch index create/delete operations await `.waitTask()` to prevent state corruption
+- [x] Per-project database provisioning (PostgreSQL + MongoDB) with credential management in admin UI
 
 ### Future Phases
 - Phase 6: Backups, fail2ban, TLS certs, load testing
@@ -186,3 +196,6 @@ Total ~1.45GB for containers, ~2.55GB for OS/cache/host services (cloudflared ru
 - Self-documenting code over comments
 - Passwords: argon2 | TOTP secrets: encrypted in PG | Recovery codes: hashed in PG
 - All file tier moves are atomic: copy → verify checksum → update metadata → delete source
+- Tests use `bun:test` with type-safe `mock<T>()`
+- Dialog forms use conditional rendering (`{open && <Component />}`) to auto-reset state on close
+- Tables use `overflow-x-auto` wrappers with responsive column hiding (`hidden sm:table-cell`)

@@ -60,7 +60,13 @@ export function CreateFolderDialog({ open, onOpenChange, parentId }: CreateFolde
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) setName("");
+        onOpenChange(v);
+      }}
+    >
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>New folder</DialogTitle>

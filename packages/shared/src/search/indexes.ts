@@ -28,7 +28,7 @@ export async function createProjectIndex(
   primaryKey: string = "id",
 ) {
   const uid = scopedIndexName(projectName, collectionName);
-  return client.createIndex(uid, { primaryKey });
+  await client.createIndex(uid, { primaryKey }).waitTask();
 }
 
 export async function deleteProjectIndex(
@@ -37,10 +37,10 @@ export async function deleteProjectIndex(
   collectionName: string,
 ) {
   const uid = scopedIndexName(projectName, collectionName);
-  return client.deleteIndex(uid);
+  await client.deleteIndex(uid).waitTask();
 }
 
 export async function deleteAllProjectIndexes(client: MeiliSearch, projectName: string) {
   const indexes = await getProjectIndexes(client, projectName);
-  await Promise.all(indexes.map((idx) => client.deleteIndex(idx.uid)));
+  await Promise.all(indexes.map((idx) => client.deleteIndex(idx.uid).waitTask()));
 }

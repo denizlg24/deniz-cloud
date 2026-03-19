@@ -119,17 +119,19 @@ export function UsersPage() {
                 New user
               </Button>
             </DialogTrigger>
-            <CreateUserDialog
-              onCreated={() => {
-                setCreateOpen(false);
-                refresh();
-              }}
-            />
+            {createOpen && (
+              <CreateUserDialog
+                onCreated={() => {
+                  setCreateOpen(false);
+                  refresh();
+                }}
+              />
+            )}
           </Dialog>
         </div>
       </div>
 
-      <div className="rounded-lg border overflow-hidden">
+      <div className="rounded-lg border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>

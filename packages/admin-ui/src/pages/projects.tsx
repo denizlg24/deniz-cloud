@@ -166,17 +166,19 @@ export function ProjectsPage() {
                 New project
               </Button>
             </DialogTrigger>
-            <CreateProjectDialog
-              onCreated={() => {
-                setCreateOpen(false);
-                refresh();
-              }}
-            />
+            {createOpen && (
+              <CreateProjectDialog
+                onCreated={() => {
+                  setCreateOpen(false);
+                  refresh();
+                }}
+              />
+            )}
           </Dialog>
         </div>
       </div>
 
-      <div className="rounded-lg border overflow-hidden">
+      <div className="rounded-lg border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -474,14 +476,16 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
                   New key
                 </Button>
               </DialogTrigger>
-              <CreateApiKeyDialog
-                projectId={project.id}
-                onCreated={(key) => {
-                  setNewKey(key);
-                  refreshKeys();
-                }}
-                newKey={newKey}
-              />
+              {createOpen && (
+                <CreateApiKeyDialog
+                  projectId={project.id}
+                  onCreated={(key) => {
+                    setNewKey(key);
+                    refreshKeys();
+                  }}
+                  newKey={newKey}
+                />
+              )}
             </Dialog>
           </div>
         </div>
@@ -489,7 +493,7 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
         {loading ? (
           <Skeleton className="h-48" />
         ) : (
-          <div className="rounded-lg border overflow-hidden">
+          <div className="rounded-lg border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -592,13 +596,15 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
                   New collection
                 </Button>
               </DialogTrigger>
-              <CreateCollectionDialog
-                projectId={project.id}
-                onCreated={() => {
-                  setCreateCollOpen(false);
-                  refreshCollections();
-                }}
-              />
+              {createCollOpen && (
+                <CreateCollectionDialog
+                  projectId={project.id}
+                  onCreated={() => {
+                    setCreateCollOpen(false);
+                    refreshCollections();
+                  }}
+                />
+              )}
             </Dialog>
           </div>
         </div>
@@ -606,7 +612,7 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
         {collectionsLoading ? (
           <Skeleton className="h-48" />
         ) : (
-          <div className="rounded-lg border overflow-hidden">
+          <div className="rounded-lg border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -621,16 +627,16 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
               <TableBody>
                 {collections.map((coll) => (
                   <TableRow key={coll.id}>
-                    <TableCell className="font-medium">
+                    <TableCell className="font-medium max-w-[200px]">
                       <div className="flex items-center gap-2">
-                        <Search className="h-4 w-4 text-muted-foreground" />
-                        {coll.name}
+                        <Search className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="truncate">{coll.name}</span>
                       </div>
-                      <code className="text-[10px] text-muted-foreground">
+                      <code className="text-[10px] text-muted-foreground truncate block">
                         {coll.meiliIndexUid}
                       </code>
                     </TableCell>
-                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground max-w-[200px] truncate">
                       {coll.mongoDatabase}.{coll.mongoCollection}
                     </TableCell>
                     <TableCell>
