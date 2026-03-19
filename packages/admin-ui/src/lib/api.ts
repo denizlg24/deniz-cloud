@@ -171,6 +171,8 @@ export interface Project {
   description: string | null;
   ownerId: string;
   storageFolderId: string | null;
+  meiliApiKey: string | null;
+  meiliApiKeyUid: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -354,6 +356,28 @@ export async function discoverFields(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mongoDatabase, mongoCollection }),
   });
+  return res.data;
+}
+
+export type SearchRules = Record<string, { filter?: string } | null>;
+
+export interface SearchTokenResult {
+  token: string;
+  expiresAt: string;
+}
+
+export async function generateSearchToken(
+  projectId: string,
+  input: { expiresInHours?: number; searchRules?: SearchRules },
+): Promise<SearchTokenResult> {
+  const res = await request<{ data: SearchTokenResult }>(
+    `/projects/${projectId}/search-token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
   return res.data;
 }
 

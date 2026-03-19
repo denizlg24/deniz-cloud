@@ -68,6 +68,7 @@ import {
   deleteProject,
   deprovisionDatabase,
   discoverFields,
+  generateSearchToken,
   getApiKeys,
   getCollections,
   getProjectDatabases,
@@ -78,6 +79,7 @@ import {
   provisionDatabase,
   resyncCollection,
   revokeApiKey,
+  type SearchRules,
   updateCollectionApi,
 } from "@/lib/api";
 import { formatDate } from "@/lib/format";
@@ -338,6 +340,7 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
   const [deleteCollTarget, setDeleteCollTarget] = useState<ProjectCollection | null>(null);
   const [deprovisionTarget, setDeprovisionTarget] = useState<ProjectDatabase | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
+  const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
 
   const refreshKeys = useCallback(async () => {
     try {
@@ -718,6 +721,44 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
               </TableBody>
             </Table>
           </div>
+        )}
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-medium flex items-center gap-2">
+            <Search className="h-4 w-4" />
+            Meilisearch
+          </h2>
+          {project.meiliApiKey && (
+            <Dialog
+              open={tokenDialogOpen}
+              onOpenChange={setTokenDialogOpen}
+            >
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline">
+                  <Key className="h-4 w-4 mr-1" />
+                  Tenant token
+                </Button>
+              </DialogTrigger>
+              {tokenDialogOpen && (
+                <GenerateSearchTokenDialog
+                  projectId={project.id}
+                  projectSlug={project.slug}
+                  collections={collections}
+                  onClose={() => setTokenDialogOpen(false)}
+                />
+              )}
+            </Dialog>
+          )}
+        </div>
+
+        {project.meiliApiKey ? (
+          <MeiliApiKeyDisplay apiKey={project.meiliApiKey} projectSlug={project.slug} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No Meilisearch API key yet. Create a search collection to auto-provision one.
+          </p>
         )}
       </div>
 
@@ -1409,6 +1450,286 @@ function CreateCollectionDialog({
           </Button>
         </DialogFooter>
       </form>
+    </DialogContent>
+  );
+}
+
+function MeiliApiKeyDisplay({ apiKey, projectSlug }: { apiKey: string; projectSlug: string }) {
+  const [visible, setVisible] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(apiKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Project API Key</span>
+        <Badge variant="secondary" className="text-[10px]">{projectSlug}_*</Badge>
+      </div>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 text-xs bg-muted px-2 py-1.5 rounded font-mono overflow-hidden">
+          {visible ? apiKey : "••••••••••••••••••••••••••••••••••••••••"}
+        </code>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0"
+          onClick={() => setVisible((v) => !v)}
+        >
+          {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0"
+          onClick={handleCopy}
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Use this key with the Meilisearch SDK. Scoped to <code>{projectSlug}_*</code> indexes.
+      </p>
+    </div>
+  );
+}
+
+function GenerateSearchTokenDialog({
+  projectId,
+  projectSlug,
+  collections,
+  onClose,
+}: {
+  projectId: string;
+  projectSlug: string;
+  collections: ProjectCollection[];
+  onClose: () => void;
+}) {
+  const [expiresIn, setExpiresIn] = useState("24");
+  const [useCustomRules, setUseCustomRules] = useState(false);
+  const [indexRules, setIndexRules] = useState<Array<{ index: string; filter: string }>>([]);
+  const [generating, setGenerating] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  function addRule() {
+    const firstAvailable = collections.find(
+      (c) => !indexRules.some((r) => r.index === c.meiliIndexUid),
+    );
+    if (firstAvailable) {
+      setIndexRules([...indexRules, { index: firstAvailable.meiliIndexUid, filter: "" }]);
+    }
+  }
+
+  function removeRule(idx: number) {
+    setIndexRules(indexRules.filter((_, i) => i !== idx));
+  }
+
+  function updateRule(idx: number, field: "index" | "filter", value: string) {
+    setIndexRules(indexRules.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  }
+
+  async function handleGenerate() {
+    setGenerating(true);
+    try {
+      let searchRules: SearchRules | undefined;
+      if (useCustomRules && indexRules.length > 0) {
+        searchRules = {};
+        for (const rule of indexRules) {
+          searchRules[rule.index] = rule.filter.trim()
+            ? { filter: rule.filter.trim() }
+            : null;
+        }
+      }
+
+      const result = await generateSearchToken(projectId, {
+        expiresInHours: Number(expiresIn),
+        searchRules,
+      });
+      setToken(result.token);
+      setExpiresAt(result.expiresAt);
+    } catch {
+      toast.error("Failed to generate search token");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function handleCopy() {
+    if (!token) return;
+    await navigator.clipboard.writeText(token);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  if (token) {
+    return (
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Search token generated</DialogTitle>
+          <DialogDescription>
+            Use this token with the Meilisearch SDK to perform scoped searches.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-4 space-y-3">
+          <div className="flex items-start gap-2">
+            <code
+              className="flex-1 bg-muted p-3 rounded text-xs font-mono break-all select-all max-h-32 overflow-y-auto"
+              style={{ width: 0, minWidth: "100%" }}
+            >
+              {token}
+            </code>
+            <Button variant="outline" size="icon" onClick={handleCopy} className="shrink-0 mt-1">
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            </Button>
+          </div>
+          {expiresAt && (
+            <p className="text-xs text-muted-foreground">
+              Expires: {formatDate(expiresAt)}
+            </p>
+          )}
+          <div className="border rounded-lg p-3 bg-muted/50 space-y-1.5">
+            <p className="text-xs font-medium">Usage</p>
+            <pre className="text-xs font-mono overflow-x-auto">
+{`import { MeiliSearch } from 'meilisearch'
+
+const client = new MeiliSearch({
+  host: 'https://search.denizlg24.com',
+  apiKey: '<token>'
+})
+
+const results = await client
+  .index('${projectSlug}_<collection>')
+  .search('query')`}
+            </pre>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    );
+  }
+
+  return (
+    <DialogContent className="max-w-lg">
+      <DialogHeader>
+        <DialogTitle>Generate search token</DialogTitle>
+        <DialogDescription>
+          Create a Meilisearch tenant token scoped to this project. Use per-index filters for
+          multi-tenant access control.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 py-4">
+        <div className="space-y-2">
+          <Label>Expiration</Label>
+          <Select value={expiresIn} onValueChange={setExpiresIn}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">1 hour</SelectItem>
+              <SelectItem value="24">24 hours</SelectItem>
+              <SelectItem value="168">7 days</SelectItem>
+              <SelectItem value="720">30 days</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            {/* biome-ignore lint/a11y/noLabelWithoutControl: checkbox label */}
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={useCustomRules}
+                onCheckedChange={(checked) => {
+                  setUseCustomRules(checked === true);
+                  if (checked && indexRules.length === 0) addRule();
+                }}
+              />
+              Per-index filter rules (multi-tenancy)
+            </label>
+          </div>
+
+          {!useCustomRules && (
+            <p className="text-xs text-muted-foreground">
+              Token will grant unfiltered search access to all <code>{projectSlug}_*</code> indexes.
+            </p>
+          )}
+
+          {useCustomRules && (
+            <div className="space-y-2">
+              {indexRules.map((rule, idx) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: stable within dialog lifetime
+                <div key={idx} className="flex items-start gap-2">
+                  <div className="flex-1 space-y-1.5">
+                    <Select
+                      value={rule.index}
+                      onValueChange={(v) => updateRule(idx, "index", v)}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {collections.map((c) => (
+                          <SelectItem key={c.meiliIndexUid} value={c.meiliIndexUid}>
+                            {c.meiliIndexUid}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={rule.filter}
+                      onChange={(e) => updateRule(idx, "filter", e.target.value)}
+                      placeholder="tenant_id = 42"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+                    onClick={() => removeRule(idx)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+              {indexRules.length < collections.length && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addRule}
+                  className="w-full"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Add index rule
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      <DialogFooter>
+        <Button onClick={handleGenerate} disabled={generating}>
+          {generating ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              Generating...
+            </>
+          ) : (
+            "Generate token"
+          )}
+        </Button>
+      </DialogFooter>
     </DialogContent>
   );
 }

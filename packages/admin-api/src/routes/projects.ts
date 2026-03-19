@@ -7,6 +7,8 @@ import {
   deleteProjectSearchKey,
   generateProjectToken,
   scopedIndexName,
+  type TenantSearchRules,
+  validateSearchRules,
 } from "@deniz-cloud/shared/search";
 import {
   createApiKey,
@@ -577,12 +579,25 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
         ? Math.min(body.expiresInHours, 720)
         : 24;
 
+    let searchRules: TenantSearchRules | undefined;
+    if (body.searchRules && typeof body.searchRules === "object" && !Array.isArray(body.searchRules)) {
+      searchRules = body.searchRules as TenantSearchRules;
+      const validationError = validateSearchRules(searchRules, project.slug);
+      if (validationError) {
+        return c.json(
+          { error: { code: "INVALID_SEARCH_RULES", message: validationError } },
+          400,
+        );
+      }
+    }
+
     const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
 
     const token = await generateProjectToken({
       apiKey: project.meiliApiKey,
       apiKeyUid: project.meiliApiKeyUid,
       projectName: project.slug,
+      searchRules,
       expiresAt,
     });
 

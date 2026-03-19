@@ -1,7 +1,12 @@
 import { describe, expect, it, mock } from "bun:test";
 import { randomUUID } from "node:crypto";
 import type { MeiliSearch } from "meilisearch";
-import { createProjectSearchKey, deleteProjectSearchKey, generateProjectToken } from "../tokens";
+import {
+  createProjectSearchKey,
+  deleteProjectSearchKey,
+  generateProjectToken,
+  validateSearchRules,
+} from "../tokens";
 
 describe("createProjectSearchKey", () => {
   it("creates a key scoped to the project prefix with full index/document actions", async () => {
@@ -173,5 +178,84 @@ describe("generateProjectToken", () => {
 
     // searchRules should contain the project prefix wildcard
     expect(payload.searchRules).toHaveProperty("scoped-project_*");
+  });
+
+  it("embeds custom searchRules with filters into the token payload", async () => {
+    const uid = randomUUID();
+    const token = await generateProjectToken({
+      apiKey: "filter-test-key",
+      apiKeyUid: uid,
+      projectName: "myapp",
+      searchRules: {
+        myapp_users: { filter: "tenant_id = 42" },
+        myapp_orders: { filter: "tenant_id = 42" },
+      },
+    });
+
+    const payloadB64 = token.split(".")[1];
+    if (!payloadB64) throw new Error("Missing JWT payload segment");
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+
+    expect(payload.searchRules).toEqual({
+      myapp_users: { filter: "tenant_id = 42" },
+      myapp_orders: { filter: "tenant_id = 42" },
+    });
+  });
+
+  it("uses wildcard fallback when searchRules is omitted", async () => {
+    const uid = randomUUID();
+    const token = await generateProjectToken({
+      apiKey: "fallback-key",
+      apiKeyUid: uid,
+      projectName: "proj",
+    });
+
+    const payloadB64 = token.split(".")[1];
+    if (!payloadB64) throw new Error("Missing JWT payload segment");
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+
+    expect(payload.searchRules).toHaveProperty("proj_*");
+    expect(payload.searchRules["proj_*"]).toBeNull();
+  });
+});
+
+describe("validateSearchRules", () => {
+  it("returns null for rules within project scope", () => {
+    expect(
+      validateSearchRules(
+        { myapp_users: { filter: "tenant_id = 1" }, myapp_orders: null },
+        "myapp",
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for the project wildcard pattern", () => {
+    expect(validateSearchRules({ "myapp_*": null }, "myapp")).toBeNull();
+  });
+
+  it("returns error for indexes outside project scope", () => {
+    const result = validateSearchRules(
+      { other_project_users: { filter: "id = 1" } },
+      "myapp",
+    );
+    expect(result).toContain("outside project scope");
+    expect(result).toContain("other_project_users");
+  });
+
+  it("returns error when mixing valid and invalid indexes", () => {
+    const result = validateSearchRules(
+      { myapp_users: null, foreign_index: null },
+      "myapp",
+    );
+    expect(result).toContain("foreign_index");
+  });
+
+  it("accepts rules with filter strings", () => {
+    expect(
+      validateSearchRules(
+        { myapp_products: { filter: "category = 'electronics' AND visible = true" } },
+        "myapp",
+      ),
+    ).toBeNull();
   });
 });

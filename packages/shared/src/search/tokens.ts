@@ -41,16 +41,35 @@ export async function deleteProjectSearchKey(
   await client.deleteKey(apiKeyUid);
 }
 
+export type TenantSearchRules = Record<string, { filter?: string } | null>;
+
+export function validateSearchRules(
+  rules: TenantSearchRules,
+  projectName: string,
+): string | null {
+  const prefix = `${projectName}_`;
+  const wildcard = `${projectName}_*`;
+  for (const indexPattern of Object.keys(rules)) {
+    if (indexPattern !== wildcard && !indexPattern.startsWith(prefix)) {
+      return `Index "${indexPattern}" is outside project scope "${prefix}*"`;
+    }
+  }
+  return null;
+}
+
 export async function generateProjectToken(config: {
   apiKey: string;
   apiKeyUid: string;
   projectName: string;
+  searchRules?: TenantSearchRules;
   expiresAt?: Date;
 }): Promise<string> {
+  const rules = config.searchRules ?? { [`${config.projectName}_*`]: null };
+
   return generateTenantToken({
     apiKey: config.apiKey,
     apiKeyUid: config.apiKeyUid,
-    searchRules: { [`${config.projectName}_*`]: null },
+    searchRules: rules,
     expiresAt: config.expiresAt ?? new Date(Date.now() + DEFAULT_TOKEN_TTL_MS),
   });
 }
