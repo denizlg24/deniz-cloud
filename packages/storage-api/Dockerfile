@@ -8,6 +8,7 @@ COPY packages/storage-api/package.json ./packages/storage-api/
 COPY packages/storage-ui/package.json ./packages/storage-ui/
 COPY packages/admin-api/package.json ./packages/admin-api/
 COPY packages/admin-ui/package.json ./packages/admin-ui/
+COPY packages/terminal-server/package.json ./packages/terminal-server/
 
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile
 
@@ -29,6 +30,7 @@ COPY packages/storage-api/package.json ./packages/storage-api/
 COPY packages/storage-ui/package.json ./packages/storage-ui/
 COPY packages/admin-api/package.json ./packages/admin-api/
 COPY packages/admin-ui/package.json ./packages/admin-ui/
+COPY packages/terminal-server/package.json ./packages/terminal-server/
 
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --ignore-scripts
 
