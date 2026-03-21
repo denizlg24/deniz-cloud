@@ -3,6 +3,13 @@ import { dirname } from "node:path";
 import type { Database } from "@deniz-cloud/shared/db";
 import { files, folders } from "@deniz-cloud/shared/db";
 import type { AuthVariables } from "@deniz-cloud/shared/middleware";
+import {
+  buildFileDocument,
+  buildFolderDocument,
+  indexStorageDocuments,
+  type MeiliSearch,
+  removeStorageDocuments,
+} from "@deniz-cloud/shared/search";
 import { count, desc, eq, like, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { deleteDir, ensureDir } from "../utils/fs";
@@ -21,6 +28,7 @@ import { ensureSharedFolder, initUserStorage } from "../utils/storage";
 
 interface FolderRouteDeps {
   db: Database;
+  meili: MeiliSearch;
   ssdStoragePath: string;
   hddStoragePath: string;
   tempUploadPath: string;
@@ -33,6 +41,7 @@ function parentPath(filePath: string): string {
 
 export function folderRoutes({
   db,
+  meili,
   ssdStoragePath,
   hddStoragePath,
   tempUploadPath,
@@ -164,6 +173,11 @@ export function folderRoutes({
 
     if (!created) {
       throw new Error("Failed to create folder");
+    }
+
+    const folderDoc = buildFolderDocument(created);
+    if (folderDoc) {
+      void indexStorageDocuments(meili, [folderDoc]).catch(console.error);
     }
 
     return c.json(
@@ -468,6 +482,53 @@ export function folderRoutes({
       throw err;
     }
 
+    void (async () => {
+      try {
+        const [updatedFolders, updatedFiles] = await Promise.all([
+          db
+            .select({
+              id: folders.id,
+              name: folders.name,
+              path: folders.path,
+              ownerId: folders.ownerId,
+              parentId: folders.parentId,
+              createdAt: folders.createdAt,
+              updatedAt: folders.updatedAt,
+            })
+            .from(folders)
+            .where(like(folders.path, `${newPath}%`)),
+          db
+            .select({
+              id: files.id,
+              filename: files.filename,
+              path: files.path,
+              ownerId: files.ownerId,
+              folderId: files.folderId,
+              mimeType: files.mimeType,
+              sizeBytes: files.sizeBytes,
+              tier: files.tier,
+              createdAt: files.createdAt,
+              updatedAt: files.updatedAt,
+            })
+            .from(files)
+            .where(like(files.path, `${newPath}/%`)),
+        ]);
+
+        const docs = [
+          ...updatedFolders
+            .map(buildFolderDocument)
+            .filter((d): d is NonNullable<typeof d> => d !== null),
+          ...updatedFiles.map(buildFileDocument),
+        ];
+
+        if (docs.length > 0) {
+          await indexStorageDocuments(meili, docs);
+        }
+      } catch (err) {
+        console.error("Failed to sync folder rename to search index:", err);
+      }
+    })();
+
     return c.json({
       data: {
         id: folder.id,
@@ -543,6 +604,8 @@ export function folderRoutes({
     const diskPath = resolveSsdDiskPath(ssdStoragePath, folder.path);
     await deleteDir(diskPath);
     await db.delete(folders).where(eq(folders.id, folderId));
+
+    void removeStorageDocuments(meili, [folderId]).catch(console.error);
 
     return c.json({ data: { id: folderId } });
   });

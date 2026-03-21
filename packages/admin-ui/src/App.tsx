@@ -6,6 +6,7 @@ import { DatabasesPage } from "@/pages/databases";
 import { LoginPage } from "@/pages/login";
 import { ProjectsPage } from "@/pages/projects";
 import { StoragePage } from "@/pages/storage";
+import { ToolsPage } from "@/pages/tools";
 import { UsersPage } from "@/pages/users";
 
 export function App() {
@@ -19,6 +20,7 @@ export function App() {
           <Route path="/users" element={<UsersPage />} />
           <Route path="/storage" element={<StoragePage />} />
           <Route path="/databases" element={<DatabasesPage />} />
+          <Route path="/tools" element={<ToolsPage />} />
         </Route>
       </Route>
     </Routes>

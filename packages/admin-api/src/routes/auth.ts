@@ -91,7 +91,7 @@ export function authRoutes({ db, jwtSecret, totpEncryptionKey, cookieName }: Aut
     if (sessionId) {
       await revokeSession(db, sessionId);
     }
-    deleteCookie(c, cookieName, { path: "/api" });
+    deleteCookie(c, cookieName, { path: "/" });
     return c.json({ data: { success: true } });
   });
 

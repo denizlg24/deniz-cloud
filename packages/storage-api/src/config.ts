@@ -9,4 +9,6 @@ export const config = {
   hddStoragePath: requiredEnv("HDD_STORAGE_PATH"),
   tempUploadPath: optionalEnv("TEMP_UPLOAD_PATH", "/tmp/deniz-cloud-uploads"),
   ssdWatermark: parseInt(optionalEnv("SSD_WATERMARK_PERCENT", "90"), 10),
+  meiliUrl: requiredEnv("MEILISEARCH_URL"),
+  meiliAdminKey: requiredEnv("MEILISEARCH_ADMIN_KEY"),
 };

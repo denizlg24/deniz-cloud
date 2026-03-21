@@ -6,7 +6,7 @@
   ],
   "scripts": {
     "dev": "sh scripts/dev.sh",
-    "dev:infra": "docker compose -f docker-compose.local.yml up -d",
+    "dev:infra": "docker compose -f docker-compose.local.yml up -d --build",
     "dev:storage-api": "bun run --filter @deniz-cloud/storage-api dev",
     "dev:admin-api": "bun run --filter @deniz-cloud/admin-api dev",
     "dev:storage-ui": "bun run --filter @deniz-cloud/storage-ui dev",

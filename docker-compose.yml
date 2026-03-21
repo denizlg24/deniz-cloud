@@ -125,6 +125,7 @@ services:
       ME_CONFIG_MONGODB_URL: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin
       ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      ME_CONFIG_SITE_BASEURL: /tools/mongo-ui
     depends_on:
       mongodb:
         condition: service_healthy
@@ -177,6 +178,7 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
       MONGODB_URI: mongodb://${MONGO_SYNC_USER:-sync_reader}:${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}@mongodb:27017/?authSource=admin&directConnection=true
       MONGODB_ADMIN_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
+      TERMINAL_SERVER_URL: ws://terminal-server:3003
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
@@ -195,3 +197,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  terminal-server:
+    build:
+      context: .
+      dockerfile: packages/terminal-server/Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+    pid: host
+    privileged: true
+    mem_limit: 64m
+    restart: unless-stopped

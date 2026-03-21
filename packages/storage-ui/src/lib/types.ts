@@ -55,3 +55,24 @@ export interface FolderContents {
 export type SortField = "name" | "date" | "size";
 export type SortDirection = "asc" | "desc";
 export type ViewMode = "grid" | "list";
+
+export interface SearchHit {
+  id: string;
+  name: string;
+  path: string;
+  type: "file" | "folder";
+  ownerId: string;
+  scope: "user" | "shared";
+  mimeType?: string | null;
+  sizeBytes?: number;
+  tier?: "ssd" | "hdd";
+  folderId?: string | null;
+  parentId?: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SearchResults {
+  hits: SearchHit[];
+  pagination: Pagination;
+}

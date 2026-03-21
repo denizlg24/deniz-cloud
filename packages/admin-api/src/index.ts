@@ -2,12 +2,14 @@ import { createDb } from "@deniz-cloud/shared/db";
 import { auth, requireRole } from "@deniz-cloud/shared/middleware";
 import { closeMongoClient, createMongoClient } from "@deniz-cloud/shared/mongo";
 import { createMeiliClient } from "@deniz-cloud/shared/search";
-import { AuthError } from "@deniz-cloud/shared/services";
+import { AuthError, validateSession } from "@deniz-cloud/shared/services";
 import { SyncWorker } from "@deniz-cloud/shared/sync";
+import type { Server, ServerWebSocket } from "bun";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { MongoClient } from "mongodb";
 import { config } from "./config";
+import { createProxyHandler } from "./proxy";
 import { authRoutes } from "./routes/auth";
 import { mongoDbRoutes } from "./routes/db-mongodb";
 import { postgresDbRoutes } from "./routes/db-postgres";
@@ -95,6 +97,19 @@ app.all("/api/*", (c) =>
   c.json({ error: { code: "NOT_FOUND", message: "Endpoint not found" } }, 404),
 );
 
+const toolsAuth = auth(db, config.jwtSecret, COOKIE_NAME);
+const toolsRole = requireRole("superuser");
+
+app.use("/tools/adminer", toolsAuth, toolsRole);
+app.use("/tools/adminer/*", toolsAuth, toolsRole);
+app.all("/tools/adminer", createProxyHandler(config.adminerUrl, "/tools/adminer"));
+app.all("/tools/adminer/*", createProxyHandler(config.adminerUrl, "/tools/adminer"));
+
+app.use("/tools/mongo-ui", toolsAuth, toolsRole);
+app.use("/tools/mongo-ui/*", toolsAuth, toolsRole);
+app.all("/tools/mongo-ui", createProxyHandler(config.mongoExpressUrl, ""));
+app.all("/tools/mongo-ui/*", createProxyHandler(config.mongoExpressUrl, ""));
+
 app.use("*", serveStatic({ root: "./static" }));
 app.get("*", serveStatic({ root: "./static", rewriteRequestPath: () => "/index.html" }));
 
@@ -124,7 +139,101 @@ const shutdown = async () => {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
+interface TerminalWsData {
+  token: string;
+  upstream: WebSocket | null;
+}
+
+function extractCookie(req: Request, name: string): string | null {
+  const header = req.headers.get("cookie");
+  if (!header) return null;
+  const match = header.split(";").find((c) => c.trim().startsWith(`${name}=`));
+  return match ? (match.split("=")[1]?.trim() ?? null) : null;
+}
+
 export default {
   port: config.port,
-  fetch: app.fetch,
+  fetch(req: Request, server: Server<TerminalWsData>) {
+    const url = new URL(req.url);
+
+    if (url.pathname === "/api/terminal") {
+      const token = extractCookie(req, COOKIE_NAME);
+      if (!token) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+
+      const upgradeData: TerminalWsData = { token, upstream: null };
+      if (
+        server.upgrade(req, {
+          data: upgradeData,
+        })
+      ) {
+        return undefined;
+      }
+      return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+
+    return app.fetch(req, server);
+  },
+  websocket: {
+    async open(ws: ServerWebSocket<TerminalWsData>) {
+      const { token } = ws.data;
+      if (!token) {
+        ws.close(1008, "Unauthorized");
+        return;
+      }
+
+      try {
+        const { user } = await validateSession(db, token, config.jwtSecret);
+        if (user.role !== "superuser") {
+          ws.close(1008, "Forbidden");
+          return;
+        }
+      } catch {
+        ws.close(1008, "Unauthorized");
+        return;
+      }
+
+      const upstream = new WebSocket(config.terminalServerUrl);
+
+      ws.data.upstream = upstream;
+
+      upstream.addEventListener("message", (event) => {
+        try {
+          if (typeof event.data === "string") {
+            ws.send(event.data);
+          } else if (event.data instanceof ArrayBuffer) {
+            ws.send(new Uint8Array(event.data));
+          }
+        } catch {
+          upstream.close();
+        }
+      });
+
+      upstream.addEventListener("close", () => {
+        try {
+          ws.close(1000, "Terminal closed");
+        } catch {}
+      });
+
+      upstream.addEventListener("error", () => {
+        try {
+          ws.close(1011, "Terminal server error");
+        } catch {}
+      });
+    },
+
+    message(ws: ServerWebSocket<TerminalWsData>, message: string | ArrayBuffer) {
+      const upstream = ws.data.upstream;
+      if (!upstream || upstream.readyState !== WebSocket.OPEN) return;
+      upstream.send(message);
+    },
+
+    close(ws: ServerWebSocket<TerminalWsData>) {
+      const upstream = ws.data.upstream;
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.close();
+      }
+    },
+  },
 };

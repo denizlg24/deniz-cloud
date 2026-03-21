@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { BrowserToolbar } from "@/components/browser-toolbar";
 import { CreateFolderDialog } from "@/components/create-folder-dialog";
@@ -8,12 +8,20 @@ import { FileGridSkeleton } from "@/components/file-grid-skeleton";
 import { FilePreview } from "@/components/file-preview";
 import { FolderBreadcrumbs } from "@/components/folder-breadcrumbs";
 import { RenameDialog } from "@/components/rename-dialog";
+import { SearchResults } from "@/components/search-results";
 import { ShareDialog } from "@/components/share-dialog";
 import { UploadZone } from "@/components/upload-zone";
 import { useActiveRoot } from "@/hooks/use-active-root";
 import { useFolderCache, useFolderContents, useRoots } from "@/hooks/use-folder-cache";
-import { fetchFolder, getDownloadUrl } from "@/lib/api";
-import type { SortDirection, SortField, StorageFile, StorageFolder, ViewMode } from "@/lib/types";
+import { fetchFolder, getDownloadUrl, searchFiles } from "@/lib/api";
+import type {
+  SearchHit,
+  SortDirection,
+  SortField,
+  StorageFile,
+  StorageFolder,
+  ViewMode,
+} from "@/lib/types";
 
 interface BreadcrumbSegment {
   id: string;
@@ -24,7 +32,7 @@ export function FileBrowser() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { roots, isLoading: rootsLoading } = useRoots();
   const { prefetch } = useFolderCache();
-  const { setActiveRoot } = useActiveRoot();
+  const { activeRoot, setActiveRoot } = useActiveRoot();
 
   const folderId = searchParams.get("folder") ?? roots?.userRoot.id ?? null;
   const { data: contents, isLoading, error } = useFolderContents(folderId);
@@ -33,6 +41,51 @@ export function FileBrowser() {
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [search, setSearch] = useState("");
+
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+
+  const isSearchActive = search.trim().length >= 2;
+
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (searchAbortRef.current) searchAbortRef.current.abort();
+
+    const query = search.trim();
+    if (query.length < 2) {
+      setSearchHits([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    const abort = new AbortController();
+    searchAbortRef.current = abort;
+
+    searchTimerRef.current = setTimeout(() => {
+      if (abort.signal.aborted) return;
+      searchFiles(query, activeRoot, 1, 50)
+        .then((res) => {
+          if (!abort.signal.aborted) {
+            setSearchHits(res.hits);
+            setSearchLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!abort.signal.aborted) {
+            setSearchHits([]);
+            setSearchLoading(false);
+          }
+        });
+    }, 300);
+
+    return () => {
+      abort.abort();
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, [search, activeRoot]);
 
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbSegment[]>([]);
 
@@ -186,6 +239,34 @@ export function FileBrowser() {
     [folderId],
   );
 
+  const handleSearchClickFile = useCallback(
+    (hit: SearchHit) => {
+      if (hit.folderId) {
+        navigateToFolder(hit.folderId);
+      }
+      setSearch("");
+      setPreviewFile({
+        id: hit.id,
+        filename: hit.name,
+        path: hit.path,
+        mimeType: hit.mimeType ?? null,
+        sizeBytes: hit.sizeBytes ?? 0,
+        tier: hit.tier ?? "ssd",
+        createdAt: new Date(hit.createdAt).toISOString(),
+        updatedAt: new Date(hit.updatedAt).toISOString(),
+      });
+    },
+    [navigateToFolder],
+  );
+
+  const handleSearchClickFolder = useCallback(
+    (hit: SearchHit) => {
+      setSearch("");
+      navigateToFolder(hit.id);
+    },
+    [navigateToFolder],
+  );
+
   const handleUploadClick = useCallback(() => {
     setUploadOpen(true);
   }, []);
@@ -216,7 +297,15 @@ export function FileBrowser() {
       )}
 
       <div className="flex-1 overflow-auto">
-        {initializing || (isLoading && !contents) ? (
+        {isSearchActive ? (
+          <SearchResults
+            hits={searchHits}
+            isLoading={searchLoading}
+            query={search.trim()}
+            onClickFile={handleSearchClickFile}
+            onClickFolder={handleSearchClickFolder}
+          />
+        ) : initializing || (isLoading && !contents) ? (
           <FileGridSkeleton view={view} />
         ) : (
           <FileGrid

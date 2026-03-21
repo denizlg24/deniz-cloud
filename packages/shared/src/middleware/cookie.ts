@@ -8,7 +8,7 @@ export function sessionCookieOptions(cookieName: string): { name: string } & Coo
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "Lax",
-    path: "/api",
+    path: "/",
     maxAge: SESSION_COOKIE_MAX_AGE,
   };
 }

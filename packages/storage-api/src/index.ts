@@ -1,5 +1,6 @@
 import { createDb } from "@deniz-cloud/shared/db";
 import { auth } from "@deniz-cloud/shared/middleware";
+import { createMeiliClient, ensureStorageSearchIndex } from "@deniz-cloud/shared/search";
 import { AuthError } from "@deniz-cloud/shared/services";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
@@ -8,15 +9,18 @@ import { config } from "./config";
 import { authRoutes } from "./routes/auth";
 import { fileRoutes } from "./routes/files";
 import { folderRoutes } from "./routes/folders";
+import { searchRoutes } from "./routes/search";
 import { shareRoutes } from "./routes/share";
 import { uploadRoutes } from "./routes/uploads";
 import { PathValidationError } from "./utils/path";
 import { ensureSharedFolder, initStorageDirs } from "./utils/storage";
 
 const db = createDb(config.databaseUrl);
+const meili = createMeiliClient(config.meiliUrl, config.meiliAdminKey);
 
 await initStorageDirs(config);
 await ensureSharedFolder(db, config);
+await ensureStorageSearchIndex(meili);
 startCleanupScheduler(db);
 
 const app = new Hono();
@@ -61,6 +65,7 @@ app.route(
   "/api/uploads",
   uploadRoutes({
     db,
+    meili,
     ssdStoragePath: config.ssdStoragePath,
     hddStoragePath: config.hddStoragePath,
     tempUploadPath: config.tempUploadPath,
@@ -73,6 +78,7 @@ app.route(
   "/api/folders",
   folderRoutes({
     db,
+    meili,
     ssdStoragePath: config.ssdStoragePath,
     hddStoragePath: config.hddStoragePath,
     tempUploadPath: config.tempUploadPath,
@@ -82,8 +88,11 @@ app.route(
 app.use("/api/files/*", authMiddleware);
 app.route(
   "/api/files",
-  fileRoutes({ db, ssdStoragePath: config.ssdStoragePath, jwtSecret: config.jwtSecret }),
+  fileRoutes({ db, meili, ssdStoragePath: config.ssdStoragePath, jwtSecret: config.jwtSecret }),
 );
+
+app.use("/api/search/*", authMiddleware);
+app.route("/api/search", searchRoutes({ db, meili }));
 
 app.all("/api/*", (c) =>
   c.json({ error: { code: "NOT_FOUND", message: "Endpoint not found" } }, 404),

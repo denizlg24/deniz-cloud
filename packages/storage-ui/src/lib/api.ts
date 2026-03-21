@@ -134,6 +134,8 @@ import type {
   FolderContents,
   Pagination,
   RootFolders,
+  SearchHit,
+  SearchResults,
   StorageFile,
   StorageFileDetail,
   StorageFolder,
@@ -260,6 +262,22 @@ export async function deleteFile(fileId: string): Promise<void> {
 export function getDownloadUrl(fileId: string, forceDownload = false): string {
   const base = `${BASE}/files/${fileId}/download`;
   return forceDownload ? `${base}?download` : base;
+}
+
+interface SearchResponse {
+  data: { hits: SearchHit[] };
+  pagination: Pagination;
+}
+
+export async function searchFiles(
+  query: string,
+  scope: "user" | "shared",
+  page = 1,
+  limit = 20,
+): Promise<SearchResults> {
+  const params = new URLSearchParams({ q: query, scope, page: String(page), limit: String(limit) });
+  const res = await request<SearchResponse>(`/search?${params}`);
+  return { hits: res.data.hits, pagination: res.pagination };
 }
 
 export type ShareExpiresIn = "30m" | "1d" | "7d" | "30d" | "never";

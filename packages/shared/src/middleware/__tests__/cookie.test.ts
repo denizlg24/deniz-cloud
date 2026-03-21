@@ -17,9 +17,9 @@ describe("sessionCookieOptions", () => {
     expect(opts.sameSite).toBe("Lax");
   });
 
-  test("scopes path to /api", () => {
+  test("scopes path to /", () => {
     const opts = sessionCookieOptions("dc_session");
-    expect(opts.path).toBe("/api");
+    expect(opts.path).toBe("/");
   });
 
   test("sets maxAge to SESSION_COOKIE_MAX_AGE (24h)", () => {

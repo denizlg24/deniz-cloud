@@ -3,6 +3,12 @@ import { dirname } from "node:path";
 import type { Database } from "@deniz-cloud/shared/db";
 import { files, folders } from "@deniz-cloud/shared/db";
 import type { AuthVariables } from "@deniz-cloud/shared/middleware";
+import {
+  buildFileDocument,
+  indexStorageDocuments,
+  type MeiliSearch,
+  removeStorageDocuments,
+} from "@deniz-cloud/shared/search";
 import type { SafeUser } from "@deniz-cloud/shared/types";
 import { count, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -19,6 +25,7 @@ import { generateShareToken, isValidExpiresIn } from "../utils/share";
 
 interface FileRouteDeps {
   db: Database;
+  meili: MeiliSearch;
   ssdStoragePath: string;
   jwtSecret: string;
 }
@@ -34,7 +41,7 @@ function parentPath(filePath: string): string {
   return lastSlash <= 0 ? "/" : filePath.slice(0, lastSlash);
 }
 
-export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
+export function fileRoutes({ db, meili, ssdStoragePath, jwtSecret }: FileRouteDeps) {
   const router = new Hono<{ Variables: AuthVariables }>();
 
   router.get("/", async (c) => {
@@ -245,6 +252,8 @@ export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
     await deleteFile(file.diskPath);
     await db.delete(files).where(eq(files.id, fileId));
 
+    void removeStorageDocuments(meili, [fileId]).catch(console.error);
+
     return c.json({ data: { id: fileId } });
   });
 
@@ -380,6 +389,22 @@ export function fileRoutes({ db, ssdStoragePath, jwtSecret }: FileRouteDeps) {
       }
       throw err;
     }
+
+    const now = new Date();
+    void indexStorageDocuments(meili, [
+      buildFileDocument({
+        id: file.id,
+        filename: normalizedFilename,
+        path: newPath,
+        ownerId: file.ownerId,
+        folderId: targetFolderId,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        tier: file.tier,
+        createdAt: file.createdAt,
+        updatedAt: now,
+      }),
+    ]).catch(console.error);
 
     return c.json({
       data: {

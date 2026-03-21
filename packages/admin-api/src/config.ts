@@ -13,4 +13,7 @@ export const config = {
   postgresExternalHost: optionalEnv("POSTGRES_EXTERNAL_HOST", "postgres.denizlg24.com:5433"),
   mongodbInternalHost: optionalEnv("MONGODB_INTERNAL_HOST", "mongodb:27017"),
   mongodbExternalHost: optionalEnv("MONGODB_EXTERNAL_HOST", "mongodb.denizlg24.com:27018"),
+  adminerUrl: optionalEnv("ADMINER_URL", "http://adminer:8080"),
+  mongoExpressUrl: optionalEnv("MONGO_EXPRESS_URL", "http://mongo-express:8081"),
+  terminalServerUrl: optionalEnv("TERMINAL_SERVER_URL", "ws://terminal-server:3003"),
 };

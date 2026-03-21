@@ -3,6 +3,11 @@ import { dirname, join } from "node:path";
 import type { Database, StorageTier } from "@deniz-cloud/shared/db";
 import { files, folders, tusUploads } from "@deniz-cloud/shared/db";
 import type { AuthVariables } from "@deniz-cloud/shared/middleware";
+import {
+  buildFileDocument,
+  indexStorageDocuments,
+  type MeiliSearch,
+} from "@deniz-cloud/shared/search";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { computeChecksum, deleteFile, ensureDir, getDiskUsagePercent } from "../utils/fs";
@@ -22,6 +27,7 @@ const UPLOAD_EXPIRY_HOURS = 24;
 
 interface UploadRouteDeps {
   db: Database;
+  meili: MeiliSearch;
   ssdStoragePath: string;
   hddStoragePath: string;
   tempUploadPath: string;
@@ -52,6 +58,7 @@ function parentPath(filePath: string): string {
 
 export function uploadRoutes({
   db,
+  meili,
   ssdStoragePath,
   hddStoragePath,
   tempUploadPath,
@@ -320,7 +327,7 @@ export function uploadRoutes({
       .where(eq(tusUploads.id, uploadId));
 
     if (position === upload.sizeBytes) {
-      await finalizeUpload(db, { ssdStoragePath, hddStoragePath, ssdWatermark }, upload.id);
+      await finalizeUpload(db, meili, { ssdStoragePath, hddStoragePath, ssdWatermark }, upload.id);
     }
 
     c.header("Upload-Offset", String(position));
@@ -387,6 +394,7 @@ async function moveToFinalPath(
 
 async function finalizeUpload(
   db: Database,
+  meili: MeiliSearch,
   config: FinalizeConfig,
   uploadId: string,
 ): Promise<void> {
@@ -420,6 +428,8 @@ async function finalizeUpload(
     throw new Error(`Parent folder not found in database: ${folderPath}`);
   }
 
+  const now = new Date();
+
   try {
     await db.transaction(async (tx) => {
       await tx.insert(files).values({
@@ -437,11 +447,26 @@ async function finalizeUpload(
 
       await tx
         .update(tusUploads)
-        .set({ status: "completed", updatedAt: new Date() })
+        .set({ status: "completed", updatedAt: now })
         .where(eq(tusUploads.id, uploadId));
     });
   } catch (err) {
     await deleteFile(finalDiskPath);
     throw err;
   }
+
+  void indexStorageDocuments(meili, [
+    buildFileDocument({
+      id: fileId,
+      filename: upload.filename,
+      path: upload.targetPath,
+      ownerId: upload.ownerId,
+      folderId: folder.id,
+      mimeType: upload.mimeType,
+      sizeBytes: upload.sizeBytes,
+      tier,
+      createdAt: now,
+      updatedAt: now,
+    }),
+  ]).catch(console.error);
 }

@@ -125,9 +125,24 @@ services:
       ME_CONFIG_MONGODB_URL: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin
       ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      ME_CONFIG_SITE_BASEURL: /tools/mongo-ui
     depends_on:
       mongodb:
         condition: service_healthy
     mem_limit: 80m
     restart: unless-stopped
+
+  terminal-server:
+    build:
+      context: .
+      dockerfile: packages/terminal-server/Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      SHELL_COMMAND: /bin/bash
+      SHELL_ARGS: "-l"
+    mem_limit: 64m
+    restart: unless-stopped
+
 
