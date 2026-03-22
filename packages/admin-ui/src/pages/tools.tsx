@@ -14,7 +14,7 @@ export function ToolsPage() {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col gap-4 -m-4 md:-m-6">
-      <div className="px-4 pt-4 md:px-6 md:pt-6">
+      <div className="px-4 pt-2 md:px-6 md:pt-6">
         <h1 className="text-2xl font-bold tracking-tight">Tools</h1>
         <p className="text-sm text-muted-foreground">Database management and server terminal</p>
       </div>

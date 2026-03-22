@@ -170,7 +170,7 @@ export function WebTerminal() {
           )}
         </div>
       )}
-      <div ref={containerRef} className="h-full w-full" />
+      <div ref={containerRef} className="h-full w-full bg-[#09090b] p-2" />
     </div>
   );
 }
