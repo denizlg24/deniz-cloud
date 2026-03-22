@@ -6,7 +6,7 @@ const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const SHELL_COMMAND = process.env.SHELL_COMMAND ?? "nsenter";
 const SHELL_ARGS = process.env.SHELL_ARGS
   ? process.env.SHELL_ARGS.split(" ")
-  : ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "/bin/bash", "-l"];
+  : ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "/bin/bash", "-il"];
 
 interface TerminalSession {
   ptyProcess: pty.IPty;
