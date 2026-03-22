@@ -3,10 +3,8 @@ import * as pty from "node-pty";
 
 const PORT = parseInt(process.env.PORT ?? "3003", 10);
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
-const SHELL_COMMAND = process.env.SHELL_COMMAND ?? "nsenter";
-const SHELL_ARGS = process.env.SHELL_ARGS
-  ? process.env.SHELL_ARGS.split(" ")
-  : ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "/bin/bash", "-il"];
+const SHELL_COMMAND = process.env.SHELL_COMMAND ?? "/bin/bash";
+const SHELL_ARGS = process.env.SHELL_ARGS ? process.env.SHELL_ARGS.split(" ") : ["-il"];
 
 interface TerminalSession {
   ptyProcess: pty.IPty;
