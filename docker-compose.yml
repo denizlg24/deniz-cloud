@@ -148,6 +148,8 @@ services:
       HDD_STORAGE_PATH: /data/hdd
       TEMP_UPLOAD_PATH: /tmp/uploads
       SSD_WATERMARK_PERCENT: ${SSD_WATERMARK_PERCENT:-90}
+      MEILISEARCH_URL: http://localhost:7700
+      MEILISEARCH_ADMIN_KEY: ${MEILI_MASTER_KEY}
     volumes:
       - ${SSD_STORAGE_PATH:-./data/storage/ssd}:/data/ssd
       - ${HDD_STORAGE_PATH:-./data/storage/hdd}:/data/hdd
