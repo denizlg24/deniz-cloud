@@ -153,19 +153,40 @@ async function getDiskUsage(): Promise<
   }
 }
 
+async function getCpuTemp(): Promise<number | null> {
+  const paths = [
+    "/host/sys/class/thermal/thermal_zone0/temp",
+    "/sys/class/thermal/thermal_zone0/temp",
+  ];
+
+  for (const path of paths) {
+    try {
+      const raw = await readFile(path, "utf-8");
+      const millidegrees = parseInt(raw.trim(), 10);
+      if (!Number.isNaN(millidegrees)) {
+        return Math.round((millidegrees / 1000) * 10) / 10;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
 export function statsRoutes({ db }: StatsRouteDeps) {
   const app = new Hono<{ Variables: AuthVariables }>();
 
   app.get("/system", async (c) => {
-    const [cpu, memory, disk] = await Promise.all([
+    const [cpu, memory, disk, cpuTemp] = await Promise.all([
       getCpuUsage(),
       getMemoryUsage(),
       getDiskUsage(),
+      getCpuTemp(),
     ]);
 
     return c.json({
       data: {
         cpu,
+        cpuTemp,
         memory,
         disk,
         timestamp: new Date().toISOString(),

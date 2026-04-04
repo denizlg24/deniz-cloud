@@ -16,4 +16,7 @@ export const config = {
   adminerUrl: optionalEnv("ADMINER_URL", "http://adminer:8080"),
   mongoExpressUrl: optionalEnv("MONGO_EXPRESS_URL", "http://mongo-express:8081"),
   terminalServerUrl: optionalEnv("TERMINAL_SERVER_URL", "ws://terminal-server:3003"),
+  backupDir: optionalEnv("BACKUP_DIR", "/backups"),
+  postgresContainer: optionalEnv("POSTGRES_CONTAINER", "postgres"),
+  mongodbContainer: optionalEnv("MONGODB_CONTAINER", "mongodb"),
 };

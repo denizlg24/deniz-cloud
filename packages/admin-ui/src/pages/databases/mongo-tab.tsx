@@ -169,7 +169,7 @@ export function MongoTab() {
           <Plus className="h-4 w-4" />
         </Button>
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 h-full">
         <div className="p-1">
           {databases.map((db) => (
             <Collapsible key={db.name} open={expandedDbs.has(db.name)}>

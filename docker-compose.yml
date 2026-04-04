@@ -181,10 +181,14 @@ services:
       MONGODB_URI: mongodb://${MONGO_SYNC_USER:-sync_reader}:${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}@mongodb:27017/?authSource=admin&directConnection=true
       MONGODB_ADMIN_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
       TERMINAL_SERVER_URL: ws://terminal-server:3003
+      BACKUP_DIR: /backups
+      DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - ${SSD_MOUNT_PATH:-/mnt/ssd}:/mnt/ssd:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${BACKUP_DIR:-./data/backups}:/backups
     depends_on:
       postgres:
         condition: service_healthy

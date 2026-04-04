@@ -37,3 +37,14 @@ export {
   listProjects,
   updateProject,
 } from "./projects";
+export {
+  createTask,
+  createTaskRun,
+  deleteTask,
+  getLatestTaskRuns,
+  getTask,
+  listTaskRuns,
+  listTasks,
+  updateTask,
+  updateTaskRun,
+} from "./tasks";

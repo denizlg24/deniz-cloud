@@ -126,6 +126,7 @@ export async function resetUserMfa(userId: string): Promise<void> {
 
 export interface SystemStats {
   cpu: { usagePercent: number; cores: number };
+  cpuTemp: number | null;
   memory: {
     totalBytes: number;
     usedBytes: number;
@@ -676,6 +677,125 @@ export async function provisionDatabase(
 
 export async function deprovisionDatabase(projectId: string, dbId: string): Promise<void> {
   await request(`/projects/${projectId}/databases/${dbId}`, { method: "DELETE" });
+}
+
+export type TaskType =
+  | "backup_postgres"
+  | "backup_mongodb"
+  | "backup_files"
+  | "backup_all"
+  | "restart_container"
+  | "reboot_server";
+
+export type TaskRunStatus = "pending" | "running" | "completed" | "failed";
+
+export interface TaskConfig {
+  retentionCount?: number;
+  containerNames?: string[];
+  compress?: boolean;
+  databases?: string[];
+  sourcePaths?: string[];
+}
+
+export interface TaskRunMetadata {
+  backupPath?: string;
+  backupSizeBytes?: number;
+  durationMs?: number;
+  filesBackedUp?: number;
+}
+
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  type: TaskType;
+  cronExpression: string | null;
+  scheduledAt: string | null;
+  nextRunAt: string | null;
+  config: TaskConfig;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskRun {
+  id: string;
+  taskId: string;
+  status: TaskRunStatus;
+  startedAt: string | null;
+  completedAt: string | null;
+  output: string | null;
+  error: string | null;
+  metadata: TaskRunMetadata | null;
+  createdAt: string;
+}
+
+interface TasksListResponse {
+  data: ScheduledTask[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}
+
+interface TaskRunsListResponse {
+  data: TaskRun[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}
+
+export async function getTasks(page = 1, limit = 50): Promise<TasksListResponse> {
+  return request<TasksListResponse>(`/tasks?page=${page}&limit=${limit}`);
+}
+
+export async function getTaskDetail(id: string): Promise<ScheduledTask> {
+  const res = await request<{ data: ScheduledTask }>(`/tasks/${id}`);
+  return res.data;
+}
+
+export async function createTask(input: {
+  name: string;
+  type: TaskType;
+  cronExpression?: string;
+  scheduledAt?: string;
+  config?: TaskConfig;
+}): Promise<ScheduledTask> {
+  const res = await request<{ data: ScheduledTask }>("/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return res.data;
+}
+
+export async function updateTaskApi(
+  id: string,
+  input: {
+    name?: string;
+    cronExpression?: string | null;
+    scheduledAt?: string | null;
+    config?: TaskConfig;
+    enabled?: boolean;
+  },
+): Promise<ScheduledTask> {
+  const res = await request<{ data: ScheduledTask }>(`/tasks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return res.data;
+}
+
+export async function deleteTaskApi(id: string): Promise<void> {
+  await request(`/tasks/${id}`, { method: "DELETE" });
+}
+
+export async function runTaskNow(id: string): Promise<void> {
+  await request(`/tasks/${id}/run`, { method: "POST" });
+}
+
+export async function getTaskRuns(
+  taskId: string,
+  page = 1,
+  limit = 20,
+): Promise<TaskRunsListResponse> {
+  return request<TaskRunsListResponse>(`/tasks/${taskId}/runs?page=${page}&limit=${limit}`);
 }
 
 export interface MongoFindResult {

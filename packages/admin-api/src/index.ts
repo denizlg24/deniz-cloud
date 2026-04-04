@@ -16,7 +16,9 @@ import { postgresDbRoutes } from "./routes/db-postgres";
 import { projectDatabaseRoutes } from "./routes/project-databases";
 import { projectRoutes } from "./routes/projects";
 import { statsRoutes } from "./routes/stats";
+import { taskRoutes } from "./routes/tasks";
 import { userRoutes } from "./routes/users";
+import { startScheduler, stopScheduler } from "./scheduler";
 
 const db = createDb(config.databaseUrl);
 const meiliClient = createMeiliClient(config.meiliUrl, config.meiliMasterKey);
@@ -88,6 +90,10 @@ app.route(
   }),
 );
 
+app.use("/api/tasks/*", auth(db, config.jwtSecret, COOKIE_NAME));
+app.use("/api/tasks/*", requireRole("superuser"));
+app.route("/api/tasks", taskRoutes({ db }));
+
 app.use("/api/db/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/db/*", requireRole("superuser"));
 app.route("/api/db/postgres", postgresDbRoutes({ db, databaseUrl: config.databaseUrl }));
@@ -125,11 +131,16 @@ Promise.all([mongoClient.connect(), mongoAdminClient.connect()])
     console.error("[admin-api] Sync worker will not start. Collections can still be managed.");
   });
 
+startScheduler(db).catch((err) => {
+  console.error("[admin-api] Scheduler start error:", err);
+});
+
 let isShuttingDown = false;
 const shutdown = async () => {
   if (isShuttingDown) return;
   isShuttingDown = true;
   console.log("[admin-api] Shutting down...");
+  stopScheduler();
   await syncWorker.stop();
   await mongoAdminClient.close();
   await closeMongoClient();

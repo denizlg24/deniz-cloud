@@ -5,6 +5,7 @@ import {
   FolderOpen,
   HardDrive,
   RefreshCw,
+  Thermometer,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -141,7 +142,25 @@ export function DashboardPage() {
                 label="CPU"
                 color="var(--color-chart-1)"
               />
-              <p className="text-xs text-muted-foreground">{system.cpu.cores} cores</p>
+              <p className="text-xs text-muted-foreground">
+                {system.cpu.cores} cores
+                {system.cpuTemp != null && (
+                  <span className="inline-flex items-center gap-0.5 ml-2">
+                    <Thermometer className="h-3 w-3" />
+                    <span
+                      className={
+                        system.cpuTemp >= 80
+                          ? "text-destructive font-medium"
+                          : system.cpuTemp >= 65
+                            ? "text-yellow-600"
+                            : ""
+                      }
+                    >
+                      {system.cpuTemp}°C
+                    </span>
+                  </span>
+                )}
+              </p>
             </div>
             <div className="space-y-1 text-center">
               <GaugeChart

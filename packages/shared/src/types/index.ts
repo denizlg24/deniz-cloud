@@ -3,8 +3,11 @@ import type {
   FieldMapping,
   Project,
   ProjectCollection,
+  ScheduledTask,
   Session,
   SyncStatus,
+  TaskRun,
+  TaskType,
   User,
   UserRole,
   UserStatus,
@@ -52,4 +55,17 @@ export interface PaginatedResponse<T> {
   };
 }
 
-export type { FieldMapping, SyncStatus, UserRole, UserStatus };
+export type SafeScheduledTask = ScheduledTask;
+
+export type SafeTaskRun = TaskRun;
+
+export const TASK_TYPES = [
+  "backup_postgres",
+  "backup_mongodb",
+  "backup_files",
+  "backup_all",
+  "restart_container",
+  "reboot_server",
+] as const satisfies readonly TaskType[];
+
+export type { FieldMapping, SyncStatus, TaskType, UserRole, UserStatus };

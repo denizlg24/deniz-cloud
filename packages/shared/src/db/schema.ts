@@ -27,6 +27,24 @@ export type StorageTier = (typeof storageTierEnum.enumValues)[number];
 export const uploadStatusEnum = pgEnum("upload_status", ["in_progress", "completed", "expired"]);
 export type UploadStatus = (typeof uploadStatusEnum.enumValues)[number];
 
+export const taskTypeEnum = pgEnum("task_type", [
+  "backup_postgres",
+  "backup_mongodb",
+  "backup_files",
+  "backup_all",
+  "restart_container",
+  "reboot_server",
+]);
+export type TaskType = (typeof taskTypeEnum.enumValues)[number];
+
+export const taskRunStatusEnum = pgEnum("task_run_status", [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+]);
+export type TaskRunStatus = (typeof taskRunStatusEnum.enumValues)[number];
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   username: varchar("username", { length: 255 }).notNull().unique(),
@@ -266,6 +284,67 @@ export const tusUploads = pgTable(
   ],
 );
 
+export const scheduledTasks = pgTable(
+  "scheduled_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    type: taskTypeEnum("type").notNull(),
+    cronExpression: varchar("cron_expression", { length: 100 }),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    config: jsonb("config").$type<TaskConfig>().notNull().default({}),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("scheduled_tasks_type_idx").on(table.type),
+    index("scheduled_tasks_next_run_at_idx").on(table.nextRunAt),
+    index("scheduled_tasks_enabled_idx").on(table.enabled),
+  ],
+);
+
+export const taskRuns = pgTable(
+  "task_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => scheduledTasks.id, { onDelete: "cascade" }),
+    status: taskRunStatusEnum("status").notNull().default("pending"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    output: text("output"),
+    error: text("error"),
+    metadata: jsonb("metadata").$type<TaskRunMetadata>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("task_runs_task_id_idx").on(table.taskId),
+    index("task_runs_status_idx").on(table.status),
+    index("task_runs_started_at_idx").on(table.startedAt),
+  ],
+);
+
+export interface TaskConfig {
+  retentionCount?: number;
+  containerNames?: string[];
+  compress?: boolean;
+  databases?: string[];
+  sourcePaths?: string[];
+}
+
+export interface TaskRunMetadata {
+  backupPath?: string;
+  backupSizeBytes?: number;
+  durationMs?: number;
+  filesBackedUp?: number;
+}
+
 export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   recoveryCodes: many(recoveryCodes),
@@ -274,6 +353,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   folders: many(folders),
   files: many(files),
   tusUploads: many(tusUploads),
+  scheduledTasks: many(scheduledTasks),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
@@ -341,6 +421,15 @@ export const tusUploadsRelations = relations(tusUploads, ({ one }) => ({
   owner: one(users, { fields: [tusUploads.ownerId], references: [users.id] }),
 }));
 
+export const scheduledTasksRelations = relations(scheduledTasks, ({ one, many }) => ({
+  creator: one(users, { fields: [scheduledTasks.createdBy], references: [users.id] }),
+  runs: many(taskRuns),
+}));
+
+export const taskRunsRelations = relations(taskRuns, ({ one }) => ({
+  task: one(scheduledTasks, { fields: [taskRuns.taskId], references: [scheduledTasks.id] }),
+}));
+
 export type User = InferSelectModel<typeof users>;
 export type NewUser = InferInsertModel<typeof users>;
 
@@ -373,3 +462,9 @@ export type NewStorageFile = InferInsertModel<typeof files>;
 
 export type TusUpload = InferSelectModel<typeof tusUploads>;
 export type NewTusUpload = InferInsertModel<typeof tusUploads>;
+
+export type ScheduledTask = InferSelectModel<typeof scheduledTasks>;
+export type NewScheduledTask = InferInsertModel<typeof scheduledTasks>;
+
+export type TaskRun = InferSelectModel<typeof taskRuns>;
+export type NewTaskRun = InferInsertModel<typeof taskRuns>;

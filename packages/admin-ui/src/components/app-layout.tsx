@@ -1,4 +1,13 @@
-import { BarChart3, Database, FolderOpen, HardDrive, LogOut, Users, Wrench } from "lucide-react";
+import {
+  BarChart3,
+  CalendarClock,
+  Database,
+  FolderOpen,
+  HardDrive,
+  LogOut,
+  Users,
+  Wrench,
+} from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -24,6 +33,7 @@ const navItems = [
   { to: "/databases", icon: Database, label: "Databases" },
   { to: "/users", icon: Users, label: "Users" },
   { to: "/storage", icon: HardDrive, label: "Storage" },
+  { to: "/tasks", icon: CalendarClock, label: "Tasks" },
   { to: "/tools", icon: Wrench, label: "Tools" },
 ];
 

@@ -21,6 +21,9 @@ RUN cd packages/admin-ui && bun run build
 FROM oven/bun:1-alpine
 WORKDIR /app
 
+# Docker CLI for backup exec and container management
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+
 # Copy built UI first to sequence this stage after the build stage completes
 COPY --from=build /app/packages/admin-ui/dist ./packages/admin-api/static
 
