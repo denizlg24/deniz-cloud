@@ -14,8 +14,8 @@ export async function executeMongoBackup(
   const backupPath = join(backupDir, filename);
   const containerBackupPath = `/tmp/${filename}`;
 
-  const mongoUser = process.env.MONGO_INITDB_ROOT_USERNAME ?? "admin";
-  const mongoPass = process.env.MONGO_INITDB_ROOT_PASSWORD ?? "";
+  const mongoUser = config.mongoUser;
+  const mongoPass = config.mongoPassword;
 
   const dumpArgs = [
     "docker",

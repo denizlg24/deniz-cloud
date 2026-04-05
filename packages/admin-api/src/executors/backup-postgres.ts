@@ -16,10 +16,12 @@ export async function executePostgresBackup(
   const dumpResult = await exec([
     "docker",
     "exec",
+    "-e",
+    `PGPASSWORD=${config.postgresPassword}`,
     config.postgresContainer,
     "pg_dumpall",
     "-U",
-    process.env.POSTGRES_USER ?? "postgres",
+    config.postgresUser,
     "--clean",
   ]);
 

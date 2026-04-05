@@ -184,6 +184,10 @@ services:
       MONGODB_ADMIN_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
       TERMINAL_SERVER_URL: ws://terminal-server:3003
       BACKUP_DIR: /backups
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
       DOCKER_HOST: unix:///var/run/docker.sock
       SSD_DEVICE: ${SSD_DEVICE:-/dev/nvme0n1p1}
       HDD_DEVICES: ${HDD_DEVICES:-}
