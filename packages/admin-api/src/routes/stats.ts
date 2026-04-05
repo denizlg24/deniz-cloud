@@ -5,6 +5,7 @@ import { files, folders, sessions, users } from "@deniz-cloud/shared/db/schema";
 import type { AuthVariables } from "@deniz-cloud/shared/middleware";
 import { count, eq, gt, sum } from "drizzle-orm";
 import { Hono } from "hono";
+import { config } from "../config.js";
 
 interface StatsRouteDeps {
   db: Database;
@@ -86,16 +87,34 @@ async function getMemoryUsage(): Promise<{
   }
 }
 
-async function getDiskUsage(): Promise<
-  Array<{
-    mount: string;
-    totalBytes: number;
-    usedBytes: number;
-    availableBytes: number;
-    usagePercent: number;
-  }>
-> {
-  if (process.platform === "win32") return [];
+interface DiskInfo {
+  device: string;
+  totalBytes: number;
+  usedBytes: number;
+  availableBytes: number;
+  usagePercent: number;
+  online: boolean;
+}
+
+interface DiskUsage {
+  ssd: DiskInfo | null;
+  hdd: DiskInfo[];
+  microsd: DiskInfo | null;
+}
+
+function offlineDisk(device: string): DiskInfo {
+  return { device, totalBytes: 0, usedBytes: 0, availableBytes: 0, usagePercent: 0, online: false };
+}
+
+async function getDiskUsage(): Promise<DiskUsage> {
+  const result: DiskUsage = { ssd: null, hdd: [], microsd: null };
+
+  if (process.platform === "win32") return result;
+
+  const deviceMap = new Map<
+    string,
+    { totalBytes: number; usedBytes: number; availableBytes: number }
+  >();
 
   const { execSync } = await import("node:child_process");
   try {
@@ -103,14 +122,12 @@ async function getDiskUsage(): Promise<
     let multiplier = 1;
 
     try {
-      // GNU coreutils: output in bytes with source device
       output = execSync("df -B1 --output=source,size,used,avail", {
         encoding: "utf-8",
         timeout: 5000,
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch {
-      // BusyBox (Alpine): output in 1K blocks
       output = execSync("df -kP", {
         encoding: "utf-8",
         timeout: 5000,
@@ -120,37 +137,51 @@ async function getDiskUsage(): Promise<
     }
 
     const lines = output.trim().split("\n").slice(1);
-    const seen = new Set<string>();
-    const disks: Array<{
-      mount: string;
-      totalBytes: number;
-      usedBytes: number;
-      availableBytes: number;
-      usagePercent: number;
-    }> = [];
 
     for (const line of lines) {
       const parts = line.trim().split(/\s+/);
       if (parts.length < 4 || !parts[0] || !parts[1] || !parts[2] || !parts[3]) continue;
 
       const source = parts[0];
-      if (!source.startsWith("/dev/")) continue;
-      if (seen.has(source)) continue;
-      seen.add(source);
+      if (!source.startsWith("/dev/") || deviceMap.has(source)) continue;
 
-      const totalBytes = parseInt(parts[1], 10) * multiplier;
-      const usedBytes = parseInt(parts[2], 10) * multiplier;
-      const availableBytes = parseInt(parts[3], 10) * multiplier;
-      const usagePercent =
-        totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100 * 10) / 10 : 0;
-
-      disks.push({ mount: source, totalBytes, usedBytes, availableBytes, usagePercent });
+      deviceMap.set(source, {
+        totalBytes: parseInt(parts[1], 10) * multiplier,
+        usedBytes: parseInt(parts[2], 10) * multiplier,
+        availableBytes: parseInt(parts[3], 10) * multiplier,
+      });
     }
-
-    return disks;
   } catch {
-    return [];
+    // df failed entirely — all configured devices will show as offline
   }
+
+  function matchDevice(device: string): DiskInfo {
+    const stats = deviceMap.get(device);
+    if (stats) {
+      const usagePercent =
+        stats.totalBytes > 0 ? Math.round((stats.usedBytes / stats.totalBytes) * 100 * 10) / 10 : 0;
+      return { device, ...stats, usagePercent, online: true };
+    }
+    return offlineDisk(device);
+  }
+
+  if (config.ssdDevice) {
+    result.ssd = matchDevice(config.ssdDevice);
+  }
+
+  if (config.microsdDevice) {
+    result.microsd = matchDevice(config.microsdDevice);
+  }
+
+  if (config.hddDevices) {
+    const devices = config.hddDevices
+      .split(",")
+      .map((d) => d.trim())
+      .filter(Boolean);
+    result.hdd = devices.map(matchDevice);
+  }
+
+  return result;
 }
 
 async function getCpuTemp(): Promise<number | null> {

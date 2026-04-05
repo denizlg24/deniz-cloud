@@ -148,7 +148,7 @@ services:
       HDD_STORAGE_PATH: /data/hdd
       TEMP_UPLOAD_PATH: /tmp/uploads
       SSD_WATERMARK_PERCENT: ${SSD_WATERMARK_PERCENT:-90}
-      MEILISEARCH_URL: http://localhost:7700
+      MEILISEARCH_URL: http://meilisearch:7700
       MEILISEARCH_ADMIN_KEY: ${MEILI_MASTER_KEY}
     volumes:
       - ${SSD_STORAGE_PATH:-./data/storage/ssd}:/data/ssd
@@ -183,6 +183,9 @@ services:
       TERMINAL_SERVER_URL: ws://terminal-server:3003
       BACKUP_DIR: /backups
       DOCKER_HOST: unix:///var/run/docker.sock
+      SSD_DEVICE: ${SSD_DEVICE:-/dev/nvme0n1p1}
+      HDD_DEVICES: ${HDD_DEVICES:-}
+      MICROSD_DEVICE: ${MICROSD_DEVICE:-/dev/mmcblk0p2}
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro

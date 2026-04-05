@@ -124,6 +124,15 @@ export async function resetUserMfa(userId: string): Promise<void> {
   await request(`/users/${userId}/reset-mfa`, { method: "POST" });
 }
 
+export interface DiskInfo {
+  device: string;
+  totalBytes: number;
+  usedBytes: number;
+  availableBytes: number;
+  usagePercent: number;
+  online: boolean;
+}
+
 export interface SystemStats {
   cpu: { usagePercent: number; cores: number };
   cpuTemp: number | null;
@@ -133,13 +142,11 @@ export interface SystemStats {
     availableBytes: number;
     usagePercent: number;
   };
-  disk: Array<{
-    mount: string;
-    totalBytes: number;
-    usedBytes: number;
-    availableBytes: number;
-    usagePercent: number;
-  }>;
+  disk: {
+    ssd: DiskInfo | null;
+    hdd: DiskInfo[];
+    microsd: DiskInfo | null;
+  };
   timestamp: string;
 }
 

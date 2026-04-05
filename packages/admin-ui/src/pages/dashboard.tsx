@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ChartContainer } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { DiskInfo } from "@/lib/api";
 import { getStorageStats, getSystemStats, type StorageStats, type SystemStats } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
 
@@ -84,6 +85,60 @@ function StatRow({
   );
 }
 
+function usageColor(percent: number): string {
+  if (percent >= 90) return "bg-destructive";
+  if (percent >= 70) return "bg-yellow-500";
+  return "bg-emerald-500";
+}
+
+function DriveBay({ label, disk, index }: { label: string; disk: DiskInfo; index: number }) {
+  return (
+    <div
+      className={`flex items-stretch gap-3 rounded-lg border p-3 ${disk.online ? "bg-card" : "bg-muted/30 opacity-60"}`}
+    >
+      <div className="flex flex-col items-center justify-center gap-1 px-2 border-r min-w-[52px]">
+        <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
+          Bay {index}
+        </span>
+        <div
+          className={`h-2.5 w-2.5 rounded-full ${disk.online ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/30"}`}
+        />
+      </div>
+
+      <div className="flex-1 min-w-0 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-medium text-sm">{label}</span>
+          <span className="font-mono text-xs text-muted-foreground truncate">
+            {disk.online ? disk.device : "offline"}
+          </span>
+        </div>
+
+        <div className="h-2.5 w-full rounded-full bg-muted overflow-hidden">
+          {disk.online && (
+            <div
+              className={`h-full rounded-full transition-all ${usageColor(disk.usagePercent)}`}
+              style={{ width: `${Math.min(disk.usagePercent, 100)}%` }}
+            />
+          )}
+        </div>
+
+        <div className="flex justify-between text-xs text-muted-foreground">
+          {disk.online ? (
+            <>
+              <span>
+                {formatBytes(disk.usedBytes)} / {formatBytes(disk.totalBytes)}
+              </span>
+              <span className="tabular-nums">{disk.usagePercent}%</span>
+            </>
+          ) : (
+            <span>No disk detected</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const [system, setSystem] = useState<SystemStats | null>(null);
   const [storage, setStorage] = useState<StorageStats | null>(null);
@@ -133,7 +188,7 @@ export function DashboardPage() {
         </Button>
       </div>
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2">
         {system && (
           <>
             <div className="space-y-1 text-center">
@@ -172,21 +227,31 @@ export function DashboardPage() {
                 {formatBytes(system.memory.usedBytes)} / {formatBytes(system.memory.totalBytes)}
               </p>
             </div>
-            {system.disk.slice(0, 2).map((d, i) => (
-              <div key={d.mount} className="space-y-1 text-center">
-                <GaugeChart
-                  value={d.usagePercent}
-                  label={i === 0 ? "SSD" : "HDD"}
-                  color={`var(--color-chart-${i + 3})`}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {formatBytes(d.usedBytes)} / {formatBytes(d.totalBytes)}
-                </p>
-              </div>
-            ))}
           </>
         )}
       </section>
+
+      {system && (
+        <section>
+          <h2 className="text-lg font-medium mb-3">Drive Bays</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(() => {
+              const bays: Array<{ label: string; disk: DiskInfo }> = [];
+              if (system.disk.ssd) bays.push({ label: "SSD", disk: system.disk.ssd });
+              system.disk.hdd.forEach((d, i) => {
+                bays.push({
+                  label: system.disk.hdd.length > 1 ? `HDD ${i + 1}` : "HDD",
+                  disk: d,
+                });
+              });
+              if (system.disk.microsd) bays.push({ label: "microSD", disk: system.disk.microsd });
+              return bays.map((bay, i) => (
+                <DriveBay key={bay.disk.device} label={bay.label} disk={bay.disk} index={i} />
+              ));
+            })()}
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-lg font-medium mb-3">Storage</h2>
@@ -218,30 +283,6 @@ export function DashboardPage() {
           />
         </div>
       </section>
-
-      {system && system.disk.length > 0 && (
-        <section>
-          <h2 className="text-lg font-medium mb-3">Disks</h2>
-          <div className="space-y-3">
-            {system.disk.map((d) => (
-              <div key={d.mount} className="space-y-1.5">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-mono text-xs">{d.mount}</span>
-                  <span className="text-muted-foreground">
-                    {formatBytes(d.usedBytes)} / {formatBytes(d.totalBytes)}
-                  </span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${Math.min(d.usagePercent, 100)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       <p className="text-xs text-muted-foreground">
         Last updated: {system ? new Date(system.timestamp).toLocaleTimeString() : "—"} ·

@@ -138,126 +138,171 @@ describe("getMemoryUsage — /proc/meminfo parsing", () => {
   });
 });
 
-describe("getDiskUsage — df output parsing", () => {
-  function parseDfOutput(
-    output: string,
-    multiplier: number,
-  ): Array<{
-    mount: string;
+describe("getDiskUsage — df parsing + device matching", () => {
+  interface DiskInfo {
+    device: string;
     totalBytes: number;
     usedBytes: number;
     availableBytes: number;
     usagePercent: number;
-  }> {
-    const lines = output.trim().split("\n").slice(1);
-    const seen = new Set<string>();
-    const disks: Array<{
-      mount: string;
-      totalBytes: number;
-      usedBytes: number;
-      availableBytes: number;
-      usagePercent: number;
-    }> = [];
+    online: boolean;
+  }
 
+  interface DiskUsage {
+    ssd: DiskInfo | null;
+    hdd: DiskInfo[];
+    microsd: DiskInfo | null;
+  }
+
+  function offlineDisk(device: string): DiskInfo {
+    return {
+      device,
+      totalBytes: 0,
+      usedBytes: 0,
+      availableBytes: 0,
+      usagePercent: 0,
+      online: false,
+    };
+  }
+
+  function parseDfAndMatch(
+    output: string,
+    multiplier: number,
+    devices: { ssd: string; hdd: string; microsd: string },
+  ): DiskUsage {
+    const deviceMap = new Map<
+      string,
+      { totalBytes: number; usedBytes: number; availableBytes: number }
+    >();
+
+    const lines = output.trim().split("\n").slice(1);
     for (const line of lines) {
       const parts = line.trim().split(/\s+/);
       if (parts.length < 4 || !parts[0] || !parts[1] || !parts[2] || !parts[3]) continue;
-
       const source = parts[0];
-      if (!source.startsWith("/dev/")) continue;
-      if (seen.has(source)) continue;
-      seen.add(source);
-
-      const totalBytes = parseInt(parts[1], 10) * multiplier;
-      const usedBytes = parseInt(parts[2], 10) * multiplier;
-      const availableBytes = parseInt(parts[3], 10) * multiplier;
-      const usagePercent =
-        totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100 * 10) / 10 : 0;
-
-      disks.push({ mount: source, totalBytes, usedBytes, availableBytes, usagePercent });
+      if (!source.startsWith("/dev/") || deviceMap.has(source)) continue;
+      deviceMap.set(source, {
+        totalBytes: parseInt(parts[1], 10) * multiplier,
+        usedBytes: parseInt(parts[2], 10) * multiplier,
+        availableBytes: parseInt(parts[3], 10) * multiplier,
+      });
     }
 
-    return disks;
+    function matchDevice(device: string): DiskInfo {
+      const stats = deviceMap.get(device);
+      if (stats) {
+        const usagePercent =
+          stats.totalBytes > 0
+            ? Math.round((stats.usedBytes / stats.totalBytes) * 100 * 10) / 10
+            : 0;
+        return { device, ...stats, usagePercent, online: true };
+      }
+      return offlineDisk(device);
+    }
+
+    const result: DiskUsage = { ssd: null, hdd: [], microsd: null };
+    if (devices.ssd) result.ssd = matchDevice(devices.ssd);
+    if (devices.microsd) result.microsd = matchDevice(devices.microsd);
+    if (devices.hdd) {
+      result.hdd = devices.hdd
+        .split(",")
+        .map((d) => d.trim())
+        .filter(Boolean)
+        .map(matchDevice);
+    }
+    return result;
   }
 
-  it("parses GNU coreutils df -B1 output (multiplier=1)", () => {
-    const output = [
-      "Filesystem        Size         Used         Avail",
-      "/dev/sda1         1000000000   400000000    600000000",
-      "/dev/sdb1         2000000000   1000000000   1000000000",
-    ].join("\n");
+  const dfOutput = [
+    "Filesystem     1K-blocks    Used Available Use% Mounted on",
+    "overlay         60789696  18252208  40013156  31% /",
+    "tmpfs              65536         0     65536   0% /dev",
+    "/dev/mmcblk0p2  60789696  18252208  40013156  31% /backups",
+    "/dev/nvme0n1p1 983378332    668464 932683324   0% /mnt/ssd",
+  ].join("\n");
 
-    const disks = parseDfOutput(output, 1);
-    expect(disks).toHaveLength(2);
-    expect(disks[0]?.mount).toBe("/dev/sda1");
-    expect(disks[0]?.totalBytes).toBe(1000000000);
-    expect(disks[0]?.usedBytes).toBe(400000000);
-    expect(disks[0]?.availableBytes).toBe(600000000);
-    expect(disks[0]?.usagePercent).toBe(40);
+  it("matches SSD by device env var", () => {
+    const result = parseDfAndMatch(dfOutput, 1024, {
+      ssd: "/dev/nvme0n1p1",
+      hdd: "",
+      microsd: "",
+    });
+    expect(result.ssd).not.toBeNull();
+    expect(result.ssd?.device).toBe("/dev/nvme0n1p1");
+    expect(result.ssd?.online).toBe(true);
+    expect(result.ssd?.totalBytes).toBe(983378332 * 1024);
   });
 
-  it("parses BusyBox df -kP output (multiplier=1024)", () => {
-    const output = [
-      "Filesystem     1K-blocks    Used Available Use% Mounted on",
-      "/dev/sda1       1000000   400000    600000  40% /",
-    ].join("\n");
-
-    const disks = parseDfOutput(output, 1024);
-    expect(disks).toHaveLength(1);
-    expect(disks[0]?.totalBytes).toBe(1000000 * 1024);
-    expect(disks[0]?.usedBytes).toBe(400000 * 1024);
+  it("matches microSD by device env var", () => {
+    const result = parseDfAndMatch(dfOutput, 1024, {
+      ssd: "",
+      hdd: "",
+      microsd: "/dev/mmcblk0p2",
+    });
+    expect(result.microsd).not.toBeNull();
+    expect(result.microsd?.device).toBe("/dev/mmcblk0p2");
+    expect(result.microsd?.online).toBe(true);
+    expect(result.microsd?.totalBytes).toBe(60789696 * 1024);
   });
 
-  it("skips non-/dev/ sources (tmpfs, overlay, etc.)", () => {
+  it("returns online: false for configured but missing device", () => {
+    const result = parseDfAndMatch(dfOutput, 1024, {
+      ssd: "/dev/nvme0n1p1",
+      hdd: "/dev/sda1",
+      microsd: "/dev/mmcblk0p2",
+    });
+    expect(result.hdd).toHaveLength(1);
+    expect(result.hdd[0]?.online).toBe(false);
+    expect(result.hdd[0]?.device).toBe("/dev/sda1");
+    expect(result.hdd[0]?.totalBytes).toBe(0);
+  });
+
+  it("supports multiple HDD devices", () => {
     const output = [
       "Filesystem     Size         Used         Avail",
-      "tmpfs          1000000      500000       500000",
-      "overlay        2000000      1000000      1000000",
-      "/dev/sda1      3000000      1500000      1500000",
+      "/dev/sda1      2000000000   1000000000   1000000000",
+      "/dev/sdb1      3000000000   500000000    2500000000",
     ].join("\n");
 
-    const disks = parseDfOutput(output, 1);
-    expect(disks).toHaveLength(1);
-    expect(disks[0]?.mount).toBe("/dev/sda1");
+    const result = parseDfAndMatch(output, 1, {
+      ssd: "",
+      hdd: "/dev/sda1,/dev/sdb1",
+      microsd: "",
+    });
+    expect(result.hdd).toHaveLength(2);
+    expect(result.hdd[0]?.device).toBe("/dev/sda1");
+    expect(result.hdd[0]?.online).toBe(true);
+    expect(result.hdd[1]?.device).toBe("/dev/sdb1");
+    expect(result.hdd[1]?.online).toBe(true);
   });
 
-  it("deduplicates devices (first occurrence wins)", () => {
+  it("returns null for unconfigured devices", () => {
+    const result = parseDfAndMatch(dfOutput, 1024, { ssd: "", hdd: "", microsd: "" });
+    expect(result.ssd).toBeNull();
+    expect(result.hdd).toHaveLength(0);
+    expect(result.microsd).toBeNull();
+  });
+
+  it("deduplicates devices in df output", () => {
     const output = [
       "Filesystem     Size         Used         Avail",
       "/dev/sda1      1000000      400000       600000",
       "/dev/sda1      1000000      500000       500000",
     ].join("\n");
 
-    const disks = parseDfOutput(output, 1);
-    expect(disks).toHaveLength(1);
-    expect(disks[0]?.usedBytes).toBe(400000);
+    const result = parseDfAndMatch(output, 1, { ssd: "/dev/sda1", hdd: "", microsd: "" });
+    expect(result.ssd?.usedBytes).toBe(400000);
   });
 
-  it("skips lines with fewer than 4 columns", () => {
+  it("skips non-/dev/ sources", () => {
     const output = [
-      "Filesystem     Size",
-      "/dev/sda1      1000000",
-      "/dev/sdb1      2000000   1000000   1000000",
+      "Filesystem     Size         Used         Avail",
+      "tmpfs          1000000      500000       500000",
+      "overlay        2000000      1000000      1000000",
     ].join("\n");
 
-    const disks = parseDfOutput(output, 1);
-    expect(disks).toHaveLength(1);
-    expect(disks[0]?.mount).toBe("/dev/sdb1");
-  });
-
-  it("returns empty array for no /dev/ devices", () => {
-    const output = ["Filesystem     Size   Used   Avail", "tmpfs          1000   500    500"].join(
-      "\n",
-    );
-
-    const disks = parseDfOutput(output, 1);
-    expect(disks).toHaveLength(0);
-  });
-
-  it("returns empty array for header-only output", () => {
-    const output = "Filesystem     Size   Used   Avail\n";
-    const disks = parseDfOutput(output, 1);
-    expect(disks).toHaveLength(0);
+    const result = parseDfAndMatch(output, 1, { ssd: "/dev/nvme0n1p1", hdd: "", microsd: "" });
+    expect(result.ssd?.online).toBe(false);
   });
 
   it("handles 0 total bytes gracefully", () => {
@@ -265,13 +310,32 @@ describe("getDiskUsage — df output parsing", () => {
       "\n",
     );
 
-    const disks = parseDfOutput(output, 1);
-    expect(disks).toHaveLength(1);
-    expect(disks[0]?.usagePercent).toBe(0);
+    const result = parseDfAndMatch(output, 1, { ssd: "/dev/sda1", hdd: "", microsd: "" });
+    expect(result.ssd?.usagePercent).toBe(0);
+    expect(result.ssd?.online).toBe(true);
+  });
+
+  it("calculates usage percent correctly", () => {
+    const output = [
+      "Filesystem     Size         Used         Avail",
+      "/dev/sda1      3000000      1000000      2000000",
+    ].join("\n");
+
+    const result = parseDfAndMatch(output, 1, { ssd: "/dev/sda1", hdd: "", microsd: "" });
+    expect(result.ssd?.usagePercent).toBe(33.3);
   });
 });
 
 describe("GET /system — response contract", () => {
+  interface DiskInfo {
+    device: string;
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usagePercent: number;
+    online: boolean;
+  }
+
   function createStatsApp(overrides: {
     cpu?: { usagePercent: number; cores: number };
     memory?: {
@@ -280,13 +344,11 @@ describe("GET /system — response contract", () => {
       availableBytes: number;
       usagePercent: number;
     };
-    disk?: Array<{
-      mount: string;
-      totalBytes: number;
-      usedBytes: number;
-      availableBytes: number;
-      usagePercent: number;
-    }>;
+    disk?: {
+      ssd: DiskInfo | null;
+      hdd: DiskInfo[];
+      microsd: DiskInfo | null;
+    };
   }) {
     const app = new Hono();
 
@@ -298,7 +360,7 @@ describe("GET /system — response contract", () => {
         availableBytes: 2_000_000_000,
         usagePercent: 50,
       };
-      const disk = overrides.disk ?? [];
+      const disk = overrides.disk ?? { ssd: null, hdd: [], microsd: null };
 
       return c.json({
         data: {
@@ -353,28 +415,33 @@ describe("GET /system — response contract", () => {
     expect(body.data.memory).toEqual(mem);
   });
 
-  it("returns disk array with correct shape per entry", async () => {
-    const disk = [
-      {
-        mount: "/dev/sda1",
-        totalBytes: 1_000_000_000,
-        usedBytes: 500_000_000,
-        availableBytes: 500_000_000,
-        usagePercent: 50,
-      },
-    ];
-    const app = createStatsApp({ disk });
+  it("returns structured disk with ssd, hdd, and microsd", async () => {
+    const ssd: DiskInfo = {
+      device: "/dev/nvme0n1p1",
+      totalBytes: 1_000_000_000_000,
+      usedBytes: 500_000_000,
+      availableBytes: 999_500_000_000,
+      usagePercent: 0.1,
+      online: true,
+    };
+    const app = createStatsApp({
+      disk: { ssd, hdd: [], microsd: null },
+    });
     const res = await app.request("/system");
     const body = await res.json();
-    expect(body.data.disk).toHaveLength(1);
-    expect(body.data.disk[0].mount).toBe("/dev/sda1");
+    expect(body.data.disk.ssd.device).toBe("/dev/nvme0n1p1");
+    expect(body.data.disk.ssd.online).toBe(true);
+    expect(body.data.disk.hdd).toHaveLength(0);
+    expect(body.data.disk.microsd).toBeNull();
   });
 
-  it("returns empty disk array on Windows", async () => {
-    const app = createStatsApp({ disk: [] });
+  it("returns null disk fields when no devices configured", async () => {
+    const app = createStatsApp({});
     const res = await app.request("/system");
     const body = await res.json();
-    expect(body.data.disk).toEqual([]);
+    expect(body.data.disk.ssd).toBeNull();
+    expect(body.data.disk.hdd).toEqual([]);
+    expect(body.data.disk.microsd).toBeNull();
   });
 });
 

@@ -19,4 +19,7 @@ export const config = {
   backupDir: optionalEnv("BACKUP_DIR", "/backups"),
   postgresContainer: optionalEnv("POSTGRES_CONTAINER", "postgres"),
   mongodbContainer: optionalEnv("MONGODB_CONTAINER", "mongodb"),
+  ssdDevice: optionalEnv("SSD_DEVICE", ""),
+  hddDevices: optionalEnv("HDD_DEVICES", ""),
+  microsdDevice: optionalEnv("MICROSD_DEVICE", ""),
 };
