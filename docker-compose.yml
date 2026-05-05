@@ -110,8 +110,6 @@ services:
       MEILI_NO_ANALYTICS: "true"
     volumes:
       - ${MEILI_DATA_DIR:-./data/meilisearch}:/meili_data
-    mem_limit: 512m
-    memswap_limit: 512m
     restart: unless-stopped
     healthcheck:
       disable: true
