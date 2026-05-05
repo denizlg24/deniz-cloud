@@ -1,7 +1,13 @@
+networks:
+  internal:
+    name: denizcloud_internal
+    driver: bridge
+
 services:
   postgres:
     container_name: postgres
     image: postgres:16-alpine
+    networks: [internal]
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     environment:
@@ -29,6 +35,7 @@ services:
   mongodb:
     container_name: mongodb
     image: mongo:7
+    networks: [internal]
     ports:
       - "${MONGO_PORT:-27018}:27017"
     environment:
@@ -50,6 +57,7 @@ services:
 
   mongo-init:
     image: mongo:7
+    networks: [internal]
     depends_on:
       mongodb:
         condition: service_healthy
@@ -91,7 +99,9 @@ services:
       SYNC_PASS: ${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
 
   meilisearch:
+    container_name: meilisearch
     image: getmeili/meilisearch:v1.38
+    networks: [internal]
     ports:
       - "${MEILI_PORT:-7700}:7700"
     environment:
@@ -107,6 +117,7 @@ services:
 
   adminer:
     image: adminer:latest
+    networks: [internal]
     ports:
       - "8080:8080"
     environment:
@@ -119,6 +130,7 @@ services:
 
   mongo-express:
     image: mongo-express:latest
+    networks: [internal]
     ports:
       - "8081:8081"
     environment:
@@ -138,6 +150,7 @@ services:
     build:
       context: .
       dockerfile: packages/storage-api/Dockerfile
+    networks: [internal]
     ports:
       - "3001:3001"
     environment:
@@ -150,7 +163,7 @@ services:
       HDD_STORAGE_PATH: /data/hdd
       TEMP_UPLOAD_PATH: /tmp/uploads
       SSD_WATERMARK_PERCENT: ${SSD_WATERMARK_PERCENT:-90}
-      MEILISEARCH_URL: https://search.denizlg24.com
+      MEILISEARCH_URL: http://meilisearch:7700
       MEILISEARCH_ADMIN_KEY: ${MEILI_MASTER_KEY}
     volumes:
       - ${SSD_STORAGE_PATH:-./data/storage/ssd}:/data/ssd
@@ -170,6 +183,7 @@ services:
     build:
       context: .
       dockerfile: packages/admin-api/Dockerfile
+    networks: [internal]
     ports:
       - "3002:3002"
     environment:
@@ -178,7 +192,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-denizcloud}
       JWT_SECRET: ${JWT_SECRET}
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
-      MEILI_URL: https://search.denizlg24.com
+      MEILI_URL: http://meilisearch:7700
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
       MONGODB_URI: mongodb://${MONGO_SYNC_USER:-sync_reader}:${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}@mongodb:27017/?authSource=admin&directConnection=true
       MONGODB_ADMIN_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
@@ -217,6 +231,7 @@ services:
     build:
       context: .
       dockerfile: packages/terminal-server/Dockerfile
+    networks: [internal]
     ports:
       - "3003:3003"
     environment:
