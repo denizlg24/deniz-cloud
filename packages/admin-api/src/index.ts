@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { MongoClient } from "mongodb";
 import { config } from "./config";
+import { createProjectPgClientFactory } from "./pg-client-factory";
 import { createProxyHandler } from "./proxy";
 import { authRoutes } from "./routes/auth";
 import { mongoDbRoutes } from "./routes/db-mongodb";
@@ -28,10 +29,15 @@ const mongoAdminClient = new MongoClient(config.mongodbAdminUri, {
   connectTimeoutMS: 5000,
 });
 
+const pgClientFactory = createProjectPgClientFactory({
+  databaseUrl: config.databaseUrl,
+});
+
 const syncWorker = new SyncWorker({
   db,
   mongo: mongoClient,
   meili: meiliClient,
+  pgClientFactory,
 });
 
 const app = new Hono();
@@ -74,7 +80,7 @@ app.route("/api/stats", statsRoutes({ db }));
 
 app.use("/api/projects/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/projects/*", requireRole("superuser"));
-app.route("/api/projects", projectRoutes({ db, meiliClient, syncWorker }));
+app.route("/api/projects", projectRoutes({ db, meiliClient, syncWorker, pgClientFactory }));
 
 app.route(
   "/api/projects",

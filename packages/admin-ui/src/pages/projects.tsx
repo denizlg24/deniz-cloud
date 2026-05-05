@@ -60,6 +60,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   type ApiKey,
+  type CollectionSourceType,
   createApiKey,
   createCollectionApi,
   createProject,
@@ -73,6 +74,11 @@ import {
   getCollections,
   getProjectDatabases,
   getProjects,
+  listProjectPgColumns,
+  listProjectPgDatabases,
+  listProjectPgSchemas,
+  listProjectPgTables,
+  type PgColumnInfo,
   type Project,
   type ProjectCollection,
   type ProjectDatabase,
@@ -585,7 +591,7 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
             <Database className="h-4 w-4" />
             Collections
             <span className="text-sm font-normal text-muted-foreground">
-              (MongoDB &rarr; Meilisearch)
+              (MongoDB / PostgreSQL &rarr; Meilisearch)
             </span>
           </h2>
           <div className="flex gap-2">
@@ -639,8 +645,13 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
                         {coll.meiliIndexUid}
                       </code>
                     </TableCell>
-                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground max-w-[200px] truncate">
-                      {coll.mongoDatabase}.{coll.mongoCollection}
+                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground max-w-[240px] truncate">
+                      <Badge variant="outline" className="mr-2 text-[10px]">
+                        {coll.sourceType === "postgres" ? "PG" : "Mongo"}
+                      </Badge>
+                      {coll.sourceType === "postgres"
+                        ? `${coll.pgDatabase}.${coll.pgSchema}.${coll.pgTable}`
+                        : `${coll.mongoDatabase}.${coll.mongoCollection}`}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -714,7 +725,8 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
                 {collections.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                      No collections yet. Create one to sync MongoDB data to Meilisearch.
+                      No collections yet. Create one to sync MongoDB or Postgres data to
+                      Meilisearch.
                     </TableCell>
                   </TableRow>
                 )}
@@ -1243,9 +1255,21 @@ function CreateCollectionDialog({
   projectId: string;
   onCreated: () => void;
 }) {
+  const [sourceType, setSourceType] = useState<CollectionSourceType>("mongodb");
   const [name, setName] = useState("");
   const [mongoDatabase, setMongoDatabase] = useState("");
   const [mongoCollection, setMongoCollection] = useState("");
+
+  const [pgDatabases, setPgDatabases] = useState<{ name: string }[]>([]);
+  const [pgDatabase, setPgDatabase] = useState("");
+  const [pgSchemas, setPgSchemas] = useState<{ name: string }[]>([]);
+  const [pgSchema, setPgSchema] = useState("");
+  const [pgTables, setPgTables] = useState<{ name: string }[]>([]);
+  const [pgTable, setPgTable] = useState("");
+  const [pgColumns, setPgColumns] = useState<PgColumnInfo[]>([]);
+  const [pgPrimaryKey, setPgPrimaryKey] = useState<string[]>([]);
+  const [pgIdColumn, setPgIdColumn] = useState("");
+
   const [submitting, setSubmitting] = useState(false);
   const [discoveredFields, setDiscoveredFields] = useState<DiscoveredField[]>([]);
   const [discovering, setDiscovering] = useState(false);
@@ -1253,24 +1277,101 @@ function CreateCollectionDialog({
   const [filterableFields, setFilterableFields] = useState<string[]>([]);
   const [sortableFields, setSortableFields] = useState<string[]>([]);
 
+  useEffect(() => {
+    if (sourceType !== "postgres") return;
+    listProjectPgDatabases(projectId)
+      .then(setPgDatabases)
+      .catch(() => toast.error("Failed to load project databases"));
+  }, [projectId, sourceType]);
+
+  useEffect(() => {
+    if (sourceType !== "postgres" || !pgDatabase) {
+      setPgSchemas([]);
+      setPgSchema("");
+      return;
+    }
+    listProjectPgSchemas(projectId, pgDatabase)
+      .then((s) => {
+        setPgSchemas(s);
+        if (s.find((x) => x.name === "public")) setPgSchema("public");
+        else if (s[0]) setPgSchema(s[0].name);
+      })
+      .catch(() => toast.error("Failed to load schemas"));
+  }, [projectId, sourceType, pgDatabase]);
+
+  useEffect(() => {
+    if (sourceType !== "postgres" || !pgDatabase || !pgSchema) {
+      setPgTables([]);
+      setPgTable("");
+      return;
+    }
+    listProjectPgTables(projectId, pgDatabase, pgSchema)
+      .then(setPgTables)
+      .catch(() => toast.error("Failed to load tables"));
+  }, [projectId, sourceType, pgDatabase, pgSchema]);
+
+  useEffect(() => {
+    if (sourceType !== "postgres" || !pgDatabase || !pgSchema || !pgTable) {
+      setPgColumns([]);
+      setPgPrimaryKey([]);
+      setPgIdColumn("");
+      return;
+    }
+    listProjectPgColumns(projectId, pgDatabase, pgSchema, pgTable)
+      .then((data) => {
+        setPgColumns(data.columns);
+        setPgPrimaryKey(data.primaryKey);
+        if (data.primaryKey.length === 1) setPgIdColumn(data.primaryKey[0] ?? "");
+        else if (data.columns[0]) setPgIdColumn(data.columns[0].name);
+      })
+      .catch(() => toast.error("Failed to load columns"));
+  }, [projectId, sourceType, pgDatabase, pgSchema, pgTable]);
+
   async function handleDiscover() {
-    if (!mongoDatabase.trim() || !mongoCollection.trim()) {
-      toast.error("Enter MongoDB database and collection names first");
+    if (sourceType === "mongodb") {
+      if (!mongoDatabase.trim() || !mongoCollection.trim()) {
+        toast.error("Enter MongoDB database and collection names first");
+        return;
+      }
+      setDiscovering(true);
+      try {
+        const result = await discoverFields(projectId, {
+          sourceType: "mongodb",
+          mongoDatabase: mongoDatabase.trim(),
+          mongoCollection: mongoCollection.trim(),
+        });
+        setDiscoveredFields(result.fields);
+        if (result.sampleCount === 0) {
+          toast.info("Collection is empty - no fields discovered");
+        } else {
+          toast.success(
+            `Discovered ${result.fields.length} fields from ${result.sampleCount} documents`,
+          );
+        }
+      } catch {
+        toast.error("Failed to discover fields. Check database/collection names.");
+      } finally {
+        setDiscovering(false);
+      }
+      return;
+    }
+
+    if (!pgDatabase || !pgSchema || !pgTable) {
+      toast.error("Select database, schema, and table first");
       return;
     }
     setDiscovering(true);
     try {
-      const result = await discoverFields(projectId, mongoDatabase.trim(), mongoCollection.trim());
+      const result = await discoverFields(projectId, {
+        sourceType: "postgres",
+        pgDatabase,
+        pgSchema,
+        pgTable,
+      });
       setDiscoveredFields(result.fields);
-      if (result.sampleCount === 0) {
-        toast.info("Collection is empty - no fields discovered");
-      } else {
-        toast.success(
-          `Discovered ${result.fields.length} fields from ${result.sampleCount} documents`,
-        );
-      }
+      toast.success(`Discovered ${result.fields.length} columns`);
     } catch {
-      toast.error("Failed to discover fields. Check database/collection names.");
+      toast.error("Failed to discover columns.");
     } finally {
       setDiscovering(false);
     }
@@ -1284,16 +1385,35 @@ function CreateCollectionDialog({
     e.preventDefault();
     setSubmitting(true);
     try {
-      await createCollectionApi(projectId, {
-        name: name.trim(),
-        mongoDatabase: mongoDatabase.trim(),
-        mongoCollection: mongoCollection.trim(),
-        fieldMapping: {
-          searchableAttributes: searchableFields.length > 0 ? searchableFields : undefined,
-          filterableAttributes: filterableFields.length > 0 ? filterableFields : undefined,
-          sortableAttributes: sortableFields.length > 0 ? sortableFields : undefined,
-        },
-      });
+      const fieldMapping = {
+        searchableAttributes: searchableFields.length > 0 ? searchableFields : undefined,
+        filterableAttributes: filterableFields.length > 0 ? filterableFields : undefined,
+        sortableAttributes: sortableFields.length > 0 ? sortableFields : undefined,
+      };
+      if (sourceType === "mongodb") {
+        await createCollectionApi(projectId, {
+          name: name.trim(),
+          sourceType: "mongodb",
+          mongoDatabase: mongoDatabase.trim(),
+          mongoCollection: mongoCollection.trim(),
+          fieldMapping,
+        });
+      } else {
+        if (!pgDatabase || !pgSchema || !pgTable || !pgIdColumn) {
+          toast.error("Select database, schema, table, and id column");
+          setSubmitting(false);
+          return;
+        }
+        await createCollectionApi(projectId, {
+          name: name.trim(),
+          sourceType: "postgres",
+          pgDatabase,
+          pgSchema,
+          pgTable,
+          pgIdColumn,
+          fieldMapping,
+        });
+      }
       toast.success(`Created collection "${name}"`);
       onCreated();
     } catch {
@@ -1303,13 +1423,20 @@ function CreateCollectionDialog({
     }
   }
 
+  const compositePkWarning =
+    sourceType === "postgres" && pgPrimaryKey.length > 1
+      ? `Table has composite primary key (${pgPrimaryKey.join(", ")}). Pick one column to use as the Meilisearch document id.`
+      : sourceType === "postgres" && pgPrimaryKey.length === 0 && pgColumns.length > 0
+        ? "Table has no primary key. Pick a column with unique values."
+        : null;
+
   return (
     <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
       <form onSubmit={handleSubmit}>
         <DialogHeader>
           <DialogTitle>Create collection</DialogTitle>
           <DialogDescription>
-            Sync a MongoDB collection to a Meilisearch index for full-text search.
+            Sync a MongoDB collection or Postgres table to a Meilisearch index.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
@@ -1328,28 +1455,133 @@ function CreateCollectionDialog({
             <p className="text-xs text-muted-foreground">Used as the Meilisearch index suffix.</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="coll-db">MongoDB database</Label>
-              <Input
-                id="coll-db"
-                value={mongoDatabase}
-                onChange={(e) => setMongoDatabase(e.target.value)}
-                placeholder="myapp"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="coll-mongocoll">MongoDB collection</Label>
-              <Input
-                id="coll-mongocoll"
-                value={mongoCollection}
-                onChange={(e) => setMongoCollection(e.target.value)}
-                placeholder="products"
-                required
-              />
-            </div>
+          <div className="space-y-2">
+            <Label>Source</Label>
+            <Select
+              value={sourceType}
+              onValueChange={(v) => {
+                setSourceType(v as CollectionSourceType);
+                setDiscoveredFields([]);
+                setSearchableFields([]);
+                setFilterableFields([]);
+                setSortableFields([]);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="mongodb">MongoDB</SelectItem>
+                <SelectItem value="postgres">PostgreSQL</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+
+          {sourceType === "mongodb" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="coll-db">MongoDB database</Label>
+                <Input
+                  id="coll-db"
+                  value={mongoDatabase}
+                  onChange={(e) => setMongoDatabase(e.target.value)}
+                  placeholder="myapp"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="coll-mongocoll">MongoDB collection</Label>
+                <Input
+                  id="coll-mongocoll"
+                  value={mongoCollection}
+                  onChange={(e) => setMongoCollection(e.target.value)}
+                  placeholder="products"
+                  required
+                />
+              </div>
+            </div>
+          )}
+
+          {sourceType === "postgres" && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Database</Label>
+                  <Select value={pgDatabase} onValueChange={setPgDatabase}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pgDatabases.map((d) => (
+                        <SelectItem key={d.name} value={d.name}>
+                          {d.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {pgDatabases.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      No PG database provisioned for this project.
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label>Schema</Label>
+                  <Select value={pgSchema} onValueChange={setPgSchema} disabled={!pgDatabase}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pgSchemas.map((s) => (
+                        <SelectItem key={s.name} value={s.name}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Table</Label>
+                  <Select value={pgTable} onValueChange={setPgTable} disabled={!pgSchema}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pgTables.map((t) => (
+                        <SelectItem key={t.name} value={t.name}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>ID column</Label>
+                  <Select value={pgIdColumn} onValueChange={setPgIdColumn} disabled={!pgTable}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pgColumns.map((c) => (
+                        <SelectItem key={c.name} value={c.name}>
+                          {c.name}
+                          {c.isPrimaryKey ? " (PK)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {compositePkWarning && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
+                  {compositePkWarning} Values must be unique — duplicates will overwrite each other
+                  in Meilisearch.
+                </div>
+              )}
+            </div>
+          )}
 
           <Button
             type="button"

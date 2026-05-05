@@ -157,6 +157,9 @@ export type SyncStatus = (typeof syncStatusEnum.enumValues)[number];
 export const dbTypeEnum = pgEnum("db_type", ["postgres", "mongodb"]);
 export type DbType = (typeof dbTypeEnum.enumValues)[number];
 
+export const collectionSourceTypeEnum = pgEnum("collection_source_type", ["mongodb", "postgres"]);
+export type CollectionSourceType = (typeof collectionSourceTypeEnum.enumValues)[number];
+
 export const projectCollections = pgTable(
   "project_collections",
   {
@@ -165,8 +168,14 @@ export const projectCollections = pgTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 255 }).notNull(),
-    mongoDatabase: varchar("mongo_database", { length: 255 }).notNull(),
-    mongoCollection: varchar("mongo_collection", { length: 255 }).notNull(),
+    sourceType: collectionSourceTypeEnum("source_type").notNull().default("mongodb"),
+    mongoDatabase: varchar("mongo_database", { length: 255 }),
+    mongoCollection: varchar("mongo_collection", { length: 255 }),
+    pgDatabase: varchar("pg_database", { length: 255 }),
+    pgSchema: varchar("pg_schema", { length: 255 }),
+    pgTable: varchar("pg_table", { length: 255 }),
+    pgIdColumn: varchar("pg_id_column", { length: 255 }),
+    pgOutboxCursor: bigint("pg_outbox_cursor", { mode: "number" }).notNull().default(0),
     meiliIndexUid: varchar("meili_index_uid", { length: 255 }).notNull().unique(),
     fieldMapping: jsonb("field_mapping").$type<FieldMapping>().notNull().default({}),
     syncEnabled: boolean("sync_enabled").notNull().default(true),

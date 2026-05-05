@@ -1,21 +1,33 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../db";
-import { type FieldMapping, projectCollections, projects } from "../db/schema";
+import {
+  type CollectionSourceType,
+  type FieldMapping,
+  projectCollections,
+  projects,
+} from "../db/schema";
 import type { SafeProjectCollection } from "../types";
 import { AuthError } from "./auth";
 
 const MAX_SYNCED_COLLECTIONS = 20;
 
+export interface CreateCollectionInput {
+  projectId: string;
+  name: string;
+  sourceType: CollectionSourceType;
+  meiliIndexUid: string;
+  fieldMapping?: FieldMapping;
+  mongoDatabase?: string;
+  mongoCollection?: string;
+  pgDatabase?: string;
+  pgSchema?: string;
+  pgTable?: string;
+  pgIdColumn?: string;
+}
+
 export async function createCollection(
   db: Database,
-  input: {
-    projectId: string;
-    name: string;
-    mongoDatabase: string;
-    mongoCollection: string;
-    meiliIndexUid: string;
-    fieldMapping?: FieldMapping;
-  },
+  input: CreateCollectionInput,
 ): Promise<SafeProjectCollection> {
   const project = await db.query.projects.findFirst({
     where: eq(projects.id, input.projectId),
@@ -40,13 +52,36 @@ export async function createCollection(
     );
   }
 
+  if (input.sourceType === "mongodb") {
+    if (!input.mongoDatabase || !input.mongoCollection) {
+      throw new AuthError(
+        "mongoDatabase and mongoCollection required for mongodb source",
+        "INVALID_INPUT",
+        400,
+      );
+    }
+  } else {
+    if (!input.pgDatabase || !input.pgSchema || !input.pgTable || !input.pgIdColumn) {
+      throw new AuthError(
+        "pgDatabase, pgSchema, pgTable, pgIdColumn required for postgres source",
+        "INVALID_INPUT",
+        400,
+      );
+    }
+  }
+
   const [collection] = await db
     .insert(projectCollections)
     .values({
       projectId: input.projectId,
       name: input.name,
-      mongoDatabase: input.mongoDatabase,
-      mongoCollection: input.mongoCollection,
+      sourceType: input.sourceType,
+      mongoDatabase: input.mongoDatabase ?? null,
+      mongoCollection: input.mongoCollection ?? null,
+      pgDatabase: input.pgDatabase ?? null,
+      pgSchema: input.pgSchema ?? null,
+      pgTable: input.pgTable ?? null,
+      pgIdColumn: input.pgIdColumn ?? null,
       meiliIndexUid: input.meiliIndexUid,
       fieldMapping: input.fieldMapping ?? {},
     })
@@ -139,6 +174,7 @@ export async function updateSyncStatus(
     lastError?: string | null;
     lastSyncedAt?: Date;
     resumeToken?: Record<string, unknown> | null;
+    pgOutboxCursor?: number;
     documentCount?: number;
     documentCountDelta?: number;
   },
@@ -148,6 +184,7 @@ export async function updateSyncStatus(
   if (status.lastError !== undefined) set.lastError = status.lastError;
   if (status.lastSyncedAt !== undefined) set.lastSyncedAt = status.lastSyncedAt;
   if (status.resumeToken !== undefined) set.resumeToken = status.resumeToken;
+  if (status.pgOutboxCursor !== undefined) set.pgOutboxCursor = status.pgOutboxCursor;
   if (status.documentCount !== undefined) set.documentCount = status.documentCount;
   if (status.documentCountDelta !== undefined) {
     set.documentCount = sql`GREATEST(0, ${projectCollections.documentCount} + ${status.documentCountDelta})`;

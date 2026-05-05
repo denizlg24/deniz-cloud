@@ -279,12 +279,20 @@ export interface FieldMapping {
   primaryKey?: string;
 }
 
+export type CollectionSourceType = "mongodb" | "postgres";
+
 export interface ProjectCollection {
   id: string;
   projectId: string;
   name: string;
-  mongoDatabase: string;
-  mongoCollection: string;
+  sourceType: CollectionSourceType;
+  mongoDatabase: string | null;
+  mongoCollection: string | null;
+  pgDatabase: string | null;
+  pgSchema: string | null;
+  pgTable: string | null;
+  pgIdColumn: string | null;
+  pgOutboxCursor: number;
   meiliIndexUid: string;
   fieldMapping: FieldMapping;
   syncEnabled: boolean;
@@ -302,14 +310,21 @@ export async function getCollections(projectId: string): Promise<ProjectCollecti
   return res.data;
 }
 
+export interface CreateCollectionInput {
+  name: string;
+  sourceType: CollectionSourceType;
+  fieldMapping?: FieldMapping;
+  mongoDatabase?: string;
+  mongoCollection?: string;
+  pgDatabase?: string;
+  pgSchema?: string;
+  pgTable?: string;
+  pgIdColumn?: string;
+}
+
 export async function createCollectionApi(
   projectId: string,
-  input: {
-    name: string;
-    mongoDatabase: string;
-    mongoCollection: string;
-    fieldMapping?: FieldMapping;
-  },
+  input: CreateCollectionInput,
 ): Promise<ProjectCollection> {
   const res = await request<{ data: ProjectCollection }>(`/projects/${projectId}/collections`, {
     method: "POST",
@@ -354,16 +369,62 @@ export interface DiscoveredField {
 
 export async function discoverFields(
   projectId: string,
-  mongoDatabase: string,
-  mongoCollection: string,
+  source:
+    | { sourceType: "mongodb"; mongoDatabase: string; mongoCollection: string }
+    | { sourceType: "postgres"; pgDatabase: string; pgSchema: string; pgTable: string },
 ): Promise<{ fields: DiscoveredField[]; sampleCount: number }> {
   const res = await request<{
     data: { fields: DiscoveredField[]; sampleCount: number };
   }>(`/projects/${projectId}/collections/discover-fields`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mongoDatabase, mongoCollection }),
+    body: JSON.stringify(source),
   });
+  return res.data;
+}
+
+export async function listProjectPgDatabases(projectId: string): Promise<{ name: string }[]> {
+  const res = await request<{ data: { name: string }[] }>(`/projects/${projectId}/pg-databases`);
+  return res.data;
+}
+
+export async function listProjectPgSchemas(
+  projectId: string,
+  database: string,
+): Promise<{ name: string }[]> {
+  const res = await request<{ data: { name: string }[] }>(
+    `/projects/${projectId}/pg-schemas?database=${encodeURIComponent(database)}`,
+  );
+  return res.data;
+}
+
+export async function listProjectPgTables(
+  projectId: string,
+  database: string,
+  schema: string,
+): Promise<{ name: string }[]> {
+  const res = await request<{ data: { name: string }[] }>(
+    `/projects/${projectId}/pg-tables?database=${encodeURIComponent(database)}&schema=${encodeURIComponent(schema)}`,
+  );
+  return res.data;
+}
+
+export interface PgColumnInfo {
+  name: string;
+  type: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+}
+
+export async function listProjectPgColumns(
+  projectId: string,
+  database: string,
+  schema: string,
+  table: string,
+): Promise<{ columns: PgColumnInfo[]; primaryKey: string[] }> {
+  const res = await request<{ data: { columns: PgColumnInfo[]; primaryKey: string[] } }>(
+    `/projects/${projectId}/pg-tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}/columns?database=${encodeURIComponent(database)}`,
+  );
   return res.data;
 }
 

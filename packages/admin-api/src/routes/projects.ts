@@ -25,7 +25,13 @@ import {
   updateCollection,
   updateProject,
 } from "@deniz-cloud/shared/services";
-import type { SyncWorker } from "@deniz-cloud/shared/sync";
+import {
+  dropPgTrigger,
+  ensureOutboxTable,
+  installPgTrigger,
+  type PgClientFactory,
+  type SyncWorker,
+} from "@deniz-cloud/shared/sync";
 import { API_KEY_SCOPES, type ApiKeyScope } from "@deniz-cloud/shared/types";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -35,6 +41,18 @@ interface ProjectRouteDeps {
   db: Database;
   meiliClient: MeiliSearch;
   syncWorker: SyncWorker;
+  pgClientFactory: PgClientFactory;
+}
+
+const PG_IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
+
+function stubPgCollection(projectId: string, pgDatabase: string) {
+  return {
+    id: "lookup",
+    projectId,
+    pgDatabase,
+    sourceType: "postgres" as const,
+  } as unknown as import("@deniz-cloud/shared/db/schema").ProjectCollection;
 }
 
 const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
@@ -73,7 +91,7 @@ async function ensureMeiliKey(
   return { apiKey: key, apiKeyUid: uid };
 }
 
-export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps) {
+export function projectRoutes({ db, meiliClient, syncWorker, pgClientFactory }: ProjectRouteDeps) {
   const app = new Hono<{ Variables: AuthVariables }>();
 
   app.get("/", async (c) => {
@@ -298,27 +316,32 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
       );
     }
 
-    if (typeof body.mongoDatabase !== "string" || body.mongoDatabase.trim().length === 0) {
-      return c.json(
-        {
-          error: {
-            code: "INVALID_INPUT",
-            message: "MongoDB database name is required",
-          },
-        },
-        400,
-      );
-    }
-    if (typeof body.mongoCollection !== "string" || body.mongoCollection.trim().length === 0) {
-      return c.json(
-        {
-          error: {
-            code: "INVALID_INPUT",
-            message: "MongoDB collection name is required",
-          },
-        },
-        400,
-      );
+    const sourceType: "mongodb" | "postgres" =
+      body.sourceType === "postgres" ? "postgres" : "mongodb";
+
+    if (sourceType === "mongodb") {
+      if (typeof body.mongoDatabase !== "string" || body.mongoDatabase.trim().length === 0) {
+        return c.json(
+          { error: { code: "INVALID_INPUT", message: "MongoDB database name is required" } },
+          400,
+        );
+      }
+      if (typeof body.mongoCollection !== "string" || body.mongoCollection.trim().length === 0) {
+        return c.json(
+          { error: { code: "INVALID_INPUT", message: "MongoDB collection name is required" } },
+          400,
+        );
+      }
+    } else {
+      for (const field of ["pgDatabase", "pgSchema", "pgTable", "pgIdColumn"] as const) {
+        const v = body[field];
+        if (typeof v !== "string" || !PG_IDENTIFIER_RE.test(v)) {
+          return c.json(
+            { error: { code: "INVALID_INPUT", message: `${field} must be a valid identifier` } },
+            400,
+          );
+        }
+      }
     }
 
     await ensureMeiliKey(db, meiliClient, project.id, project.slug);
@@ -328,11 +351,40 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
     const collection = await createCollection(db, {
       projectId: project.id,
       name: body.name,
-      mongoDatabase: body.mongoDatabase.trim(),
-      mongoCollection: body.mongoCollection.trim(),
+      sourceType,
       meiliIndexUid,
       fieldMapping: body.fieldMapping ?? {},
+      mongoDatabase: sourceType === "mongodb" ? body.mongoDatabase.trim() : undefined,
+      mongoCollection: sourceType === "mongodb" ? body.mongoCollection.trim() : undefined,
+      pgDatabase: sourceType === "postgres" ? body.pgDatabase : undefined,
+      pgSchema: sourceType === "postgres" ? body.pgSchema : undefined,
+      pgTable: sourceType === "postgres" ? body.pgTable : undefined,
+      pgIdColumn: sourceType === "postgres" ? body.pgIdColumn : undefined,
     });
+
+    if (sourceType === "postgres") {
+      try {
+        const { sql, close } = await pgClientFactory.forCollection(collection);
+        try {
+          await ensureOutboxTable(sql);
+          await installPgTrigger(sql, body.pgSchema, body.pgTable, body.pgIdColumn);
+        } finally {
+          await close();
+        }
+      } catch (err) {
+        console.error("[projects] Failed to install PG trigger; rolling back collection:", err);
+        await deleteCollection(db, collection.id).catch(() => undefined);
+        return c.json(
+          {
+            error: {
+              code: "PG_PROVISION_FAILED",
+              message: err instanceof Error ? err.message : "Failed to provision PG trigger",
+            },
+          },
+          500,
+        );
+      }
+    }
 
     try {
       await syncWorker.addCollection(collection);
@@ -460,6 +512,19 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
 
     await syncWorker.removeCollection(collectionId);
 
+    if (collection.sourceType === "postgres" && collection.pgSchema && collection.pgTable) {
+      try {
+        const { sql, close } = await pgClientFactory.forCollection(collection);
+        try {
+          await dropPgTrigger(sql, collection.pgSchema, collection.pgTable);
+        } finally {
+          await close();
+        }
+      } catch (err) {
+        console.error("[projects] Failed to drop PG trigger:", err);
+      }
+    }
+
     try {
       await meiliClient.deleteIndex(collection.meiliIndexUid).waitTask();
     } catch {
@@ -497,8 +562,176 @@ export function projectRoutes({ db, meiliClient, syncWorker }: ProjectRouteDeps)
     }
   });
 
+  app.get("/:id/pg-databases", requireScope("search:read"), async (c) => {
+    const projectId = c.req.param("id");
+    await getProject(db, projectId);
+    const { projectDatabases } = await import("@deniz-cloud/shared/db/schema");
+    const { and: drizzleAnd } = await import("drizzle-orm");
+    const records = await db
+      .select({ dbName: projectDatabases.dbName })
+      .from(projectDatabases)
+      .where(
+        drizzleAnd(
+          eq(projectDatabases.projectId, projectId),
+          eq(projectDatabases.type, "postgres"),
+        ),
+      );
+    return c.json({
+      data: records.filter((r) => r.dbName).map((r) => ({ name: r.dbName })),
+    });
+  });
+
+  app.get("/:id/pg-schemas", requireScope("search:read"), async (c) => {
+    const projectId = c.req.param("id");
+    await getProject(db, projectId);
+    const dbName = c.req.query("database");
+    if (!dbName || !PG_IDENTIFIER_RE.test(dbName)) {
+      return c.json({ error: { code: "INVALID_INPUT", message: "database required" } }, 400);
+    }
+
+    const collection = stubPgCollection(projectId, dbName);
+    const { sql, close } = await pgClientFactory.forCollection(collection);
+    try {
+      const rows = await sql<Array<{ name: string }>>`
+        SELECT nspname AS name FROM pg_namespace
+        WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+          AND nspname NOT LIKE 'pg_temp_%'
+          AND nspname NOT LIKE 'pg_toast_temp_%'
+        ORDER BY nspname
+      `;
+      return c.json({ data: rows });
+    } finally {
+      await close();
+    }
+  });
+
+  app.get("/:id/pg-tables", requireScope("search:read"), async (c) => {
+    const projectId = c.req.param("id");
+    await getProject(db, projectId);
+    const dbName = c.req.query("database");
+    const schema = c.req.query("schema") ?? "public";
+    if (!dbName || !PG_IDENTIFIER_RE.test(dbName) || !PG_IDENTIFIER_RE.test(schema)) {
+      return c.json({ error: { code: "INVALID_INPUT", message: "Invalid database/schema" } }, 400);
+    }
+
+    const collection = stubPgCollection(projectId, dbName);
+    const { sql, close } = await pgClientFactory.forCollection(collection);
+    try {
+      const rows = await sql<Array<{ name: string }>>`
+        SELECT tablename AS name FROM pg_tables
+        WHERE schemaname = ${schema}
+          AND tablename <> '_meili_outbox'
+        ORDER BY tablename
+      `;
+      return c.json({ data: rows });
+    } finally {
+      await close();
+    }
+  });
+
+  app.get("/:id/pg-tables/:schema/:table/columns", requireScope("search:read"), async (c) => {
+    const projectId = c.req.param("id");
+    await getProject(db, projectId);
+    const dbName = c.req.query("database");
+    const schema = c.req.param("schema");
+    const table = c.req.param("table");
+    if (
+      !dbName ||
+      !PG_IDENTIFIER_RE.test(dbName) ||
+      !PG_IDENTIFIER_RE.test(schema) ||
+      !PG_IDENTIFIER_RE.test(table)
+    ) {
+      return c.json({ error: { code: "INVALID_INPUT", message: "Invalid identifiers" } }, 400);
+    }
+
+    const collection = stubPgCollection(projectId, dbName);
+    const { sql, close } = await pgClientFactory.forCollection(collection);
+    try {
+      const [columns, pkRows] = await Promise.all([
+        sql<Array<{ name: string; type: string; nullable: boolean }>>`
+          SELECT a.attname AS name,
+                 format_type(a.atttypid, a.atttypmod) AS type,
+                 NOT a.attnotnull AS nullable
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = ${schema}
+            AND c.relname = ${table}
+            AND a.attnum > 0
+            AND NOT a.attisdropped
+          ORDER BY a.attnum
+        `,
+        sql<Array<{ column: string }>>`
+          SELECT a.attname AS column
+          FROM pg_index i
+          JOIN pg_class c ON c.oid = i.indrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
+          WHERE n.nspname = ${schema}
+            AND c.relname = ${table}
+            AND i.indisprimary
+          ORDER BY array_position(i.indkey, a.attnum)
+        `,
+      ]);
+      const pkColumns = pkRows.map((r) => r.column);
+      return c.json({
+        data: {
+          columns: columns.map((col) => ({
+            name: col.name,
+            type: col.type,
+            nullable: col.nullable,
+            isPrimaryKey: pkColumns.includes(col.name),
+          })),
+          primaryKey: pkColumns,
+        },
+      });
+    } finally {
+      await close();
+    }
+  });
+
   app.post("/:id/collections/discover-fields", requireScope("search:read"), async (c) => {
+    const projectId = c.req.param("id");
+    await getProject(db, projectId);
     const body = await c.req.json();
+
+    if (body.sourceType === "postgres") {
+      const { pgDatabase, pgSchema, pgTable } = body;
+      if (
+        typeof pgDatabase !== "string" ||
+        typeof pgSchema !== "string" ||
+        typeof pgTable !== "string" ||
+        !PG_IDENTIFIER_RE.test(pgDatabase) ||
+        !PG_IDENTIFIER_RE.test(pgSchema) ||
+        !PG_IDENTIFIER_RE.test(pgTable)
+      ) {
+        return c.json({ error: { code: "INVALID_INPUT", message: "Invalid PG identifiers" } }, 400);
+      }
+      const collection = stubPgCollection(projectId, pgDatabase);
+      const { sql, close } = await pgClientFactory.forCollection(collection);
+      try {
+        const rows = await sql<Array<{ name: string; type: string }>>`
+          SELECT a.attname AS name,
+                 format_type(a.atttypid, a.atttypmod) AS type
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = ${pgSchema}
+            AND c.relname = ${pgTable}
+            AND a.attnum > 0
+            AND NOT a.attisdropped
+          ORDER BY a.attnum
+        `;
+        return c.json({
+          data: {
+            fields: rows.map((r) => ({ name: r.name, types: [r.type] })),
+            sampleCount: rows.length,
+          },
+        });
+      } finally {
+        await close();
+      }
+    }
 
     if (typeof body.mongoDatabase !== "string" || body.mongoDatabase.trim().length === 0) {
       return c.json(

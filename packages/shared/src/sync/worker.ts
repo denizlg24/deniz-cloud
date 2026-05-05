@@ -2,15 +2,25 @@ import type { MeiliSearch } from "meilisearch";
 import type { ChangeStream, ChangeStreamDocument, Document, MongoClient } from "mongodb";
 import type { Database } from "../db";
 import type { ProjectCollection } from "../db/schema";
-import { transformDocument } from "./transform";
+import { dropTrigger, ensureOutboxTable, gcOutbox, pollOutbox, triggerName } from "./pg-outbox";
+import { transformDocument, transformPgRow } from "./transform";
 
 interface SyncWorkerDeps {
   db: Database;
   mongo: MongoClient;
   meili: MeiliSearch;
+  pgClientFactory?: PgClientFactory;
   batchDelayMs?: number;
   batchSize?: number;
   indexingDelayMs?: number;
+  pgPollIntervalMs?: number;
+}
+
+export interface PgClientFactory {
+  forCollection(collection: ProjectCollection): Promise<{
+    sql: import("postgres").Sql;
+    close: () => Promise<void>;
+  }>;
 }
 
 interface BatchBuffer {
@@ -21,23 +31,28 @@ interface BatchBuffer {
 
 export class SyncWorker {
   private streams = new Map<string, ChangeStream>();
+  private pgPollers = new Map<string, NodeJS.Timeout>();
   private buffers = new Map<string, BatchBuffer>();
   private abortControllers = new Map<string, AbortController>();
   private db: Database;
   private mongo: MongoClient;
   private meili: MeiliSearch;
+  private pgClientFactory?: PgClientFactory;
   private batchDelayMs: number;
   private batchSize: number;
   private indexingDelayMs: number;
+  private pgPollIntervalMs: number;
   private stopping = false;
 
   constructor(deps: SyncWorkerDeps) {
     this.db = deps.db;
     this.mongo = deps.mongo;
     this.meili = deps.meili;
+    this.pgClientFactory = deps.pgClientFactory;
     this.batchDelayMs = deps.batchDelayMs ?? 500;
     this.batchSize = deps.batchSize ?? 100;
     this.indexingDelayMs = deps.indexingDelayMs ?? 50;
+    this.pgPollIntervalMs = deps.pgPollIntervalMs ?? 2000;
   }
 
   async start(): Promise<void> {
@@ -88,10 +103,19 @@ export class SyncWorker {
   }
 
   async addCollection(collection: ProjectCollection): Promise<void> {
-    if (this.streams.has(collection.id)) return;
+    if (this.streams.has(collection.id) || this.pgPollers.has(collection.id)) return;
+
+    if (collection.sourceType === "postgres") {
+      await this.addPgCollection(collection);
+      return;
+    }
 
     if (!collection.resumeToken) {
       await this.initialSync(collection);
+    }
+
+    if (!collection.mongoDatabase || !collection.mongoCollection) {
+      throw new Error(`Collection ${collection.id} missing mongo source fields`);
     }
 
     const mongoDb = this.mongo.db(collection.mongoDatabase);
@@ -188,6 +212,12 @@ export class SyncWorker {
       this.streams.delete(collectionId);
     }
 
+    const poller = this.pgPollers.get(collectionId);
+    if (poller) {
+      clearTimeout(poller);
+      this.pgPollers.delete(collectionId);
+    }
+
     const buffer = this.buffers.get(collectionId);
     if (buffer?.timer) clearTimeout(buffer.timer);
     this.buffers.delete(collectionId);
@@ -202,11 +232,173 @@ export class SyncWorker {
     await updateSyncStatus(this.db, collectionId, {
       syncStatus: "idle",
       resumeToken: null,
+      pgOutboxCursor: 0,
       lastError: null,
     });
 
-    const fresh = { ...collection, resumeToken: null };
+    const fresh = { ...collection, resumeToken: null, pgOutboxCursor: 0 };
     await this.addCollection(fresh);
+  }
+
+  private async addPgCollection(collection: ProjectCollection): Promise<void> {
+    if (!this.pgClientFactory) {
+      throw new Error("Postgres sync requires pgClientFactory");
+    }
+    if (
+      !collection.pgDatabase ||
+      !collection.pgSchema ||
+      !collection.pgTable ||
+      !collection.pgIdColumn
+    ) {
+      throw new Error(`Collection ${collection.id} missing postgres source fields`);
+    }
+
+    const isInitial = collection.pgOutboxCursor === 0 && !collection.lastSyncedAt;
+    if (isInitial) {
+      await this.initialPgSync(collection);
+    }
+
+    this.buffers.set(collection.id, { upserts: [], deletes: [], timer: null });
+    const ac = new AbortController();
+    this.abortControllers.set(collection.id, ac);
+
+    const tick = async () => {
+      if (ac.signal.aborted) return;
+      try {
+        await this.pollPgOnce(collection);
+      } catch (err) {
+        console.error(`[SyncWorker] PG poll error for ${collection.name}:`, err);
+        const { updateSyncStatus } = await import("../services/collections");
+        await updateSyncStatus(this.db, collection.id, {
+          syncStatus: "error",
+          lastError: err instanceof Error ? err.message : String(err),
+        });
+      }
+      if (ac.signal.aborted) return;
+      const handle = setTimeout(tick, this.pgPollIntervalMs);
+      this.pgPollers.set(collection.id, handle);
+    };
+
+    const handle = setTimeout(tick, this.pgPollIntervalMs);
+    this.pgPollers.set(collection.id, handle);
+
+    console.log(
+      `[SyncWorker] Polling PG ${collection.pgDatabase}.${collection.pgSchema}.${collection.pgTable} → ${collection.meiliIndexUid}`,
+    );
+  }
+
+  private async initialPgSync(collection: ProjectCollection): Promise<void> {
+    if (!this.pgClientFactory) throw new Error("pgClientFactory missing");
+    if (!collection.pgSchema || !collection.pgTable || !collection.pgIdColumn) return;
+
+    const { updateSyncStatus } = await import("../services/collections");
+    await updateSyncStatus(this.db, collection.id, { syncStatus: "syncing" });
+
+    const { sql, close } = await this.pgClientFactory.forCollection(collection);
+    try {
+      try {
+        await this.meili.createIndex(collection.meiliIndexUid, { primaryKey: "id" }).waitTask();
+        await this.meili.index(collection.meiliIndexUid).updateSettings({
+          searchableAttributes: collection.fieldMapping.searchableAttributes ?? ["*"],
+          filterableAttributes: collection.fieldMapping.filterableAttributes ?? [],
+          sortableAttributes: collection.fieldMapping.sortableAttributes ?? [],
+        });
+      } catch {
+        // index may already exist
+      }
+
+      const { snapshotTable, getCurrentOutboxId, ensureOutboxTable } = await import("./pg-outbox");
+      await ensureOutboxTable(sql);
+
+      const startCursor = await getCurrentOutboxId(sql, collection.pgSchema, collection.pgTable);
+
+      const index = this.meili.index(collection.meiliIndexUid);
+      let total = 0;
+      const pgIdColumn = collection.pgIdColumn;
+      await snapshotTable(
+        sql,
+        collection.pgSchema,
+        collection.pgTable,
+        pgIdColumn,
+        500,
+        async (rows) => {
+          const docs = rows.map((r) => transformPgRow(r, pgIdColumn, collection.fieldMapping));
+          await index.addDocuments(docs);
+          total += rows.length;
+          if (this.indexingDelayMs > 0) {
+            await new Promise((r) => setTimeout(r, this.indexingDelayMs));
+          }
+        },
+      );
+
+      await updateSyncStatus(this.db, collection.id, {
+        syncStatus: "idle",
+        lastSyncedAt: new Date(),
+        documentCount: total,
+        pgOutboxCursor: startCursor,
+        lastError: null,
+      });
+
+      console.log(
+        `[SyncWorker] Initial PG sync complete for ${collection.meiliIndexUid}: ${total} rows`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await updateSyncStatus(this.db, collection.id, {
+        syncStatus: "error",
+        lastError: message,
+      });
+      throw err;
+    } finally {
+      await close();
+    }
+  }
+
+  private async pollPgOnce(collection: ProjectCollection): Promise<void> {
+    if (!this.pgClientFactory) return;
+    if (!collection.pgSchema || !collection.pgTable || !collection.pgIdColumn) return;
+
+    const { getCollection, updateSyncStatus } = await import("../services/collections");
+    const fresh = await getCollection(this.db, collection.id);
+    if (!fresh.syncEnabled) return;
+
+    const cursor = fresh.pgOutboxCursor ?? 0;
+    const { sql, close } = await this.pgClientFactory.forCollection(fresh);
+    try {
+      if(!fresh.pgSchema || !fresh.pgTable) return;
+      const events = await pollOutbox(sql, fresh.pgSchema, fresh.pgTable, cursor, this.batchSize);
+      if (events.length === 0) return;
+
+      const upserts: Record<string, unknown>[] = [];
+      const deletes: string[] = [];
+      for (const ev of events) {
+        if (ev.op === "delete") {
+          deletes.push(ev.rowId);
+        } else if (ev.payload) {
+          if(!fresh.pgIdColumn) continue;
+          upserts.push(transformPgRow(ev.payload, fresh.pgIdColumn, fresh.fieldMapping));
+        }
+      }
+
+      const index = this.meili.index(fresh.meiliIndexUid);
+      if (upserts.length > 0) await index.addDocuments(upserts);
+      if (deletes.length > 0) await index.deleteDocuments(deletes);
+      if(!fresh.pgSchema || !fresh.pgTable) return;
+      const lastId = events[events.length - 1]?.id;
+      if(!lastId) return;
+      await gcOutbox(sql, fresh.pgSchema, fresh.pgTable, lastId);
+
+      const delta = upserts.length - deletes.length;
+      await updateSyncStatus(this.db, collection.id, {
+        pgOutboxCursor: lastId,
+        lastSyncedAt: new Date(),
+        syncStatus: "idle",
+        lastError: null,
+        ...(delta !== 0 ? { documentCountDelta: delta } : {}),
+      });
+    } finally {
+      await close();
+    }
   }
 
   private async initialSync(collection: ProjectCollection): Promise<void> {
@@ -233,6 +425,9 @@ export class SyncWorker {
         // index may already exist
       }
 
+      if (!collection.mongoDatabase || !collection.mongoCollection) {
+        throw new Error(`Collection ${collection.id} missing mongo source fields`);
+      }
       const mongoDb = this.mongo.db(collection.mongoDatabase);
       const mongoColl = mongoDb.collection(collection.mongoCollection);
 
@@ -397,10 +592,13 @@ export class SyncWorker {
   }
 
   isWatching(collectionId: string): boolean {
-    return this.streams.has(collectionId);
+    return this.streams.has(collectionId) || this.pgPollers.has(collectionId);
   }
 
   get activeStreamCount(): number {
-    return this.streams.size;
+    return this.streams.size + this.pgPollers.size;
   }
 }
+
+// re-export so admin-api can construct trigger drops without deep imports
+export { dropTrigger as dropPgTrigger, ensureOutboxTable, triggerName as pgTriggerName };

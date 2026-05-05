@@ -1,6 +1,32 @@
 import type { Document } from "mongodb";
 import type { FieldMapping } from "../db/schema";
 
+export function transformPgRow(
+  row: Record<string, unknown>,
+  idColumn: string,
+  mapping: FieldMapping,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  const rawId = row[idColumn];
+  if (rawId === null || rawId === undefined) {
+    throw new Error(`Row missing id column "${idColumn}"`);
+  }
+  result.id =
+    typeof rawId === "string" || typeof rawId === "number"
+      ? String(rawId)
+      : ((rawId as { toString?: () => string }).toString?.() ?? String(rawId));
+
+  for (const [key, value] of Object.entries(row)) {
+    if (key === idColumn) continue;
+    if (mapping.includeFields && mapping.includeFields.length > 0) {
+      if (!mapping.includeFields.includes(key)) continue;
+    }
+    if (mapping.excludeFields?.includes(key)) continue;
+    result[key] = coerceValue(value);
+  }
+  return result;
+}
+
 export function transformDocument(doc: Document, mapping: FieldMapping): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
