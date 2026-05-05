@@ -92,7 +92,7 @@ services:
 
   meilisearch:
     container_name: meilisearch
-    image: getmeili/meilisearch:latest
+    image: getmeili/meilisearch:v1.38
     ports:
       - "${MEILI_PORT:-7700}:7700"
     environment:
