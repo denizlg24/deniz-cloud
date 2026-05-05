@@ -91,7 +91,6 @@ services:
       SYNC_PASS: ${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
 
   meilisearch:
-    container_name: meilisearch
     image: getmeili/meilisearch:v1.38
     ports:
       - "${MEILI_PORT:-7700}:7700"
@@ -99,17 +98,12 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
       MEILI_ENV: ${MEILI_ENV:-development}
       MEILI_NO_ANALYTICS: "true"
-      MEILI_HTTP_ADDR: 0.0.0.0:7700
     volumes:
       - ${MEILI_DATA_DIR:-./data/meilisearch}:/meili_data
     mem_limit: 256m
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7700/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      disable: true
 
   adminer:
     image: adminer:latest
@@ -156,7 +150,7 @@ services:
       HDD_STORAGE_PATH: /data/hdd
       TEMP_UPLOAD_PATH: /tmp/uploads
       SSD_WATERMARK_PERCENT: ${SSD_WATERMARK_PERCENT:-90}
-      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_URL: https://search.denizlg24.com
       MEILISEARCH_ADMIN_KEY: ${MEILI_MASTER_KEY}
     volumes:
       - ${SSD_STORAGE_PATH:-./data/storage/ssd}:/data/ssd
@@ -184,7 +178,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-denizcloud}
       JWT_SECRET: ${JWT_SECRET}
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
-      MEILI_URL: http://meilisearch:7700
+      MEILI_URL: https://search.denizlg24.com
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
       MONGODB_URI: mongodb://${MONGO_SYNC_USER:-sync_reader}:${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}@mongodb:27017/?authSource=admin&directConnection=true
       MONGODB_ADMIN_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
@@ -210,7 +204,7 @@ services:
       mongodb:
         condition: service_healthy
       meilisearch:
-        condition: service_healthy
+        condition: service_started
     mem_limit: 250m
     restart: unless-stopped
     healthcheck:
