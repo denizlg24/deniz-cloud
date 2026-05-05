@@ -365,7 +365,7 @@ export class SyncWorker {
     const cursor = fresh.pgOutboxCursor ?? 0;
     const { sql, close } = await this.pgClientFactory.forCollection(fresh);
     try {
-      if(!fresh.pgSchema || !fresh.pgTable) return;
+      if (!fresh.pgSchema || !fresh.pgTable) return;
       const events = await pollOutbox(sql, fresh.pgSchema, fresh.pgTable, cursor, this.batchSize);
       if (events.length === 0) return;
 
@@ -375,7 +375,7 @@ export class SyncWorker {
         if (ev.op === "delete") {
           deletes.push(ev.rowId);
         } else if (ev.payload) {
-          if(!fresh.pgIdColumn) continue;
+          if (!fresh.pgIdColumn) continue;
           upserts.push(transformPgRow(ev.payload, fresh.pgIdColumn, fresh.fieldMapping));
         }
       }
@@ -383,9 +383,9 @@ export class SyncWorker {
       const index = this.meili.index(fresh.meiliIndexUid);
       if (upserts.length > 0) await index.addDocuments(upserts);
       if (deletes.length > 0) await index.deleteDocuments(deletes);
-      if(!fresh.pgSchema || !fresh.pgTable) return;
+      if (!fresh.pgSchema || !fresh.pgTable) return;
       const lastId = events[events.length - 1]?.id;
-      if(!lastId) return;
+      if (!lastId) return;
       await gcOutbox(sql, fresh.pgSchema, fresh.pgTable, lastId);
 
       const delta = upserts.length - deletes.length;
