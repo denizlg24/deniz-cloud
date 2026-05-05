@@ -157,11 +157,7 @@ export async function snapshotTable(
   return total;
 }
 
-export async function getCurrentOutboxId(
-  sql: Sql,
-  schema: string,
-  table: string,
-): Promise<number> {
+export async function getCurrentOutboxId(sql: Sql, schema: string, table: string): Promise<number> {
   const rows = await sql<Array<{ max: string | null }>>`
     SELECT COALESCE(MAX(id), 0)::text AS max
     FROM ${sql(OUTBOX_TABLE)}
