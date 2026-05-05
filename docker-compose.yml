@@ -91,6 +91,7 @@ services:
       SYNC_PASS: ${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
 
   meilisearch:
+    container_name: meilisearch
     image: getmeili/meilisearch:latest
     ports:
       - "${MEILI_PORT:-7700}:7700"
@@ -98,12 +99,17 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
       MEILI_ENV: ${MEILI_ENV:-development}
       MEILI_NO_ANALYTICS: "true"
+      MEILI_HTTP_ADDR: 0.0.0.0:7700
     volumes:
       - ${MEILI_DATA_DIR:-./data/meilisearch}:/meili_data
     mem_limit: 256m
     restart: unless-stopped
     healthcheck:
-      disable: true
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   adminer:
     image: adminer:latest
@@ -204,7 +210,7 @@ services:
       mongodb:
         condition: service_healthy
       meilisearch:
-        condition: service_started
+        condition: service_healthy
     mem_limit: 250m
     restart: unless-stopped
     healthcheck:
