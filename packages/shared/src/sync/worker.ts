@@ -233,10 +233,16 @@ export class SyncWorker {
       syncStatus: "idle",
       resumeToken: null,
       pgOutboxCursor: 0,
+      lastSyncedAt: null,
       lastError: null,
     });
 
-    const fresh = { ...collection, resumeToken: null, pgOutboxCursor: 0 };
+    const fresh = {
+      ...collection,
+      resumeToken: null,
+      pgOutboxCursor: 0,
+      lastSyncedAt: null,
+    };
     await this.addCollection(fresh);
   }
 
@@ -307,8 +313,10 @@ export class SyncWorker {
         // index may already exist
       }
 
-      const { snapshotTable, getCurrentOutboxId, ensureOutboxTable } = await import("./pg-outbox");
+      const { snapshotTable, getCurrentOutboxId, ensureOutboxTable, installTrigger } =
+        await import("./pg-outbox");
       await ensureOutboxTable(sql);
+      await installTrigger(sql, collection.pgSchema, collection.pgTable, collection.pgIdColumn);
 
       const startCursor = await getCurrentOutboxId(sql, collection.pgSchema, collection.pgTable);
 

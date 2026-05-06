@@ -89,7 +89,7 @@ services:
       SYNC_PASS: ${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
 
   meilisearch:
-    image: getmeili/meilisearch:latest
+    image: getmeili/meilisearch:v1.38
     ports:
       - "${MEILI_PORT:-7700}:7700"
     environment:
@@ -98,7 +98,6 @@ services:
       MEILI_NO_ANALYTICS: "true"
     volumes:
       - ${MEILI_DATA_DIR:-./data/meilisearch}:/meili_data
-    mem_limit: 256m
     restart: unless-stopped
     healthcheck:
       disable: true

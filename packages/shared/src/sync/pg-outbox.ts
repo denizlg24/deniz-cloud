@@ -1,6 +1,7 @@
 import type { Sql } from "postgres";
 
 export const OUTBOX_TABLE = "_meili_outbox";
+export const OUTBOX_SCHEMA = "public";
 
 const IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 
@@ -20,7 +21,7 @@ export function triggerFnName(schema: string, table: string): string {
 
 export async function ensureOutboxTable(sql: Sql): Promise<void> {
   await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS "${OUTBOX_TABLE}" (
+    CREATE TABLE IF NOT EXISTS "${OUTBOX_SCHEMA}"."${OUTBOX_TABLE}" (
       id BIGSERIAL PRIMARY KEY,
       table_schema TEXT NOT NULL,
       table_name TEXT NOT NULL,
@@ -32,7 +33,7 @@ export async function ensureOutboxTable(sql: Sql): Promise<void> {
   `);
   await sql.unsafe(`
     CREATE INDEX IF NOT EXISTS "${OUTBOX_TABLE}_lookup_idx"
-      ON "${OUTBOX_TABLE}" (table_schema, table_name, id)
+      ON "${OUTBOX_SCHEMA}"."${OUTBOX_TABLE}" (table_schema, table_name, id)
   `);
 }
 
@@ -53,16 +54,18 @@ export async function installTrigger(
     CREATE OR REPLACE FUNCTION "${fn}"() RETURNS TRIGGER AS $fn$
     BEGIN
       IF (TG_OP = 'DELETE') THEN
-        INSERT INTO "${OUTBOX_TABLE}" (table_schema, table_name, op, row_id, payload)
+        INSERT INTO "${OUTBOX_SCHEMA}"."${OUTBOX_TABLE}" (table_schema, table_name, op, row_id, payload)
         VALUES (TG_TABLE_SCHEMA, TG_TABLE_NAME, 'delete', OLD."${idColumn}"::text, NULL);
         RETURN OLD;
       ELSE
-        INSERT INTO "${OUTBOX_TABLE}" (table_schema, table_name, op, row_id, payload)
+        INSERT INTO "${OUTBOX_SCHEMA}"."${OUTBOX_TABLE}" (table_schema, table_name, op, row_id, payload)
         VALUES (TG_TABLE_SCHEMA, TG_TABLE_NAME, lower(TG_OP), NEW."${idColumn}"::text, to_jsonb(NEW));
         RETURN NEW;
       END IF;
     END;
     $fn$ LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_catalog, public
   `);
 
   await sql.unsafe(`DROP TRIGGER IF EXISTS "${trg}" ON "${schema}"."${table}"`);

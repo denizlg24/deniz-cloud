@@ -172,7 +172,7 @@ export async function updateSyncStatus(
   status: {
     syncStatus?: "idle" | "syncing" | "error";
     lastError?: string | null;
-    lastSyncedAt?: Date;
+    lastSyncedAt?: Date | null;
     resumeToken?: Record<string, unknown> | null;
     pgOutboxCursor?: number;
     documentCount?: number;
