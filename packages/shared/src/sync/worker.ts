@@ -313,8 +313,9 @@ export class SyncWorker {
         // index may already exist
       }
 
-      const { snapshotTable, getCurrentOutboxId, ensureOutboxTable, installTrigger } =
-        await import("./pg-outbox");
+      const { snapshotTable, getCurrentOutboxId, ensureOutboxTable, installTrigger } = await import(
+        "./pg-outbox"
+      );
       await ensureOutboxTable(sql);
       await installTrigger(sql, collection.pgSchema, collection.pgTable, collection.pgIdColumn);
 
