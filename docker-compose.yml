@@ -46,7 +46,7 @@ services:
     volumes:
       - ${MONGO_DATA_DIR:-./data/mongo}:/data/db
       - ./config/mongo/replica-keyfile:/data/replica-keyfile:ro
-    entrypoint: ["/bin/bash", "-c", "cp /data/replica-keyfile /tmp/replica-keyfile && chmod 400 /tmp/replica-keyfile && chown 999:999 /tmp/replica-keyfile && exec docker-entrypoint.sh mongod --wiredTigerCacheSizeGB 0.5 --replSet rs0 --keyFile /tmp/replica-keyfile --quiet --setParameter slowOpThresholdMs=1000 --setParameter diagnosticDataCollectionEnabled=false"]
+    entrypoint: ["/bin/bash", "-c", "cp /data/replica-keyfile /tmp/replica-keyfile && chmod 400 /tmp/replica-keyfile && chown 999:999 /tmp/replica-keyfile && exec docker-entrypoint.sh mongod --wiredTigerCacheSizeGB 0.5 --replSet rs0 --keyFile /tmp/replica-keyfile --quiet --setParameter diagnosticDataCollectionEnabled=false"]
     mem_limit: 1g
     restart: unless-stopped
     healthcheck:
