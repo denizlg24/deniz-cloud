@@ -718,10 +718,11 @@ export async function executePgQuery(database: string, sql: string): Promise<PgQ
 export interface ProjectDatabase {
   id: string;
   projectId: string;
-  type: "postgres" | "mongodb";
+  type: "postgres" | "mongodb" | "redis";
   dbName: string;
   username: string;
   password: string;
+  keyPrefix?: string;
   uris: { internal: string; external: string };
   createdAt: string;
 }
@@ -733,7 +734,7 @@ export async function getProjectDatabases(projectId: string): Promise<ProjectDat
 
 export async function provisionDatabase(
   projectId: string,
-  type: "postgres" | "mongodb",
+  type: "postgres" | "mongodb" | "redis",
 ): Promise<ProjectDatabase> {
   const res = await request<{ data: ProjectDatabase }>(`/projects/${projectId}/databases`, {
     method: "POST",

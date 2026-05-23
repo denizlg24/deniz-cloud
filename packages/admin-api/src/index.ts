@@ -93,6 +93,9 @@ app.route(
     postgresExternalHost: config.postgresExternalHost,
     mongodbInternalHost: config.mongodbInternalHost,
     mongodbExternalHost: config.mongodbExternalHost,
+    redisAdminUrl: config.redisAdminUrl,
+    redisInternalHost: config.redisInternalHost,
+    redisExternalHost: config.redisExternalHost,
   }),
 );
 

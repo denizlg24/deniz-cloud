@@ -11,6 +11,7 @@ describe("admin-api config shape", () => {
       "totpEncryptionKey",
       "meiliUrl",
       "meiliMasterKey",
+      "redisAdminUrl",
     ];
 
     // Document the expected shape
@@ -38,8 +39,9 @@ describe("admin-api config shape", () => {
       "TOTP_ENCRYPTION_KEY",
       "MEILI_URL",
       "MEILI_MASTER_KEY",
+      "REDIS_ADMIN_URL",
     ];
 
-    expect(requiredVars).toHaveLength(5);
+    expect(requiredVars).toHaveLength(6);
   });
 });

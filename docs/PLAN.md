@@ -6,6 +6,7 @@ A self-hosted home server running on a Raspberry Pi 5 (4GB RAM) that provides:
 
 - **Cloud storage** with a Google Drive-like web UI and optional S3-compatible API
 - **MongoDB** and **PostgreSQL** exposed as raw TCP connections for personal projects
+- **Redis** exposed as a shared cache/queue service with per-project ACL users
 - **Admin panel** for system health, storage metadata, and lightweight DB management
 - **Tiered storage** — SSD for hot files/databases, HDD for cold/large files, transparent to users
 
@@ -30,6 +31,7 @@ All HTTP services are exposed through **Cloudflare Tunnels**. Database services 
 ├── postgres/        # PostgreSQL data directory
 ├── mongo/           # MongoDB data directory
 ├── meilisearch/     # Meilisearch data directory
+├── redis/           # Redis append-only data directory
 ├── storage/hot/     # Frequently accessed files
 └── backups/         # DB snapshot staging
 
@@ -52,6 +54,7 @@ All HTTP services are exposed through **Cloudflare Tunnels**. Database services 
                         │                                                                    │ 
                         │  mongodb.denizlg24.com ──► DNS A ───► ──► :27018 (MongoDB)         │
                         │  postgres.denizlg24.com──► DNS A ───► ──► :5433  (PostgreSQL)      │
+                        │  redis.denizlg24.com   ──► DNS A ───► ──► :6380  (Redis)           │
                         └────────────────────────────────────────────────────────────────────┘
                                         │
                                         ▼
@@ -266,7 +269,7 @@ Superuser-only interface. Accessible only after admin authentication (TOTP + rec
 - Runs every 5 minutes via cron
 - Checks current public IPv4 using a service like `ifconfig.me`
 - Compares with current Cloudflare DNS A record
-- If changed, updates A records for `mongodb.denizlg24.com` and `postgres.denizlg24.com` via Cloudflare API
+- If changed, updates A records for `mongodb.denizlg24.com`, `postgres.denizlg24.com`, and `redis.denizlg24.com` via Cloudflare API
 - Also updates AAAA records with current IPv6 for dual-stack access
 - Logs changes for audit
 
@@ -497,6 +500,7 @@ deniz-cloud/
 |---|---|---|---|
 | `postgres` | postgres:16-alpine | 5433 | 200MB |
 | `mongodb` | mongo:7 | 27018 | 400MB |
+| `redis` | redis:7-alpine | 6380 | 160MB |
 | `storage` | Custom (Bun + Hono) | 3001 | 300MB |
 | `admin` | Custom (Bun + Hono) | 3002 | 250MB |
 | `adminer` | adminer:latest | 8080 (internal only) | 100MB |
@@ -526,6 +530,7 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 |---|---|---|---|
 | `mongodb.denizlg24.com` | 27018 | TCP (MongoDB wire protocol) | A + AAAA (DNS-only, no CF proxy) |
 | `postgres.denizlg24.com` | 5433 | TCP (PostgreSQL wire protocol) | A + AAAA (DNS-only, no CF proxy) |
+| `redis.denizlg24.com` | 6380 | TCP (Redis protocol) | A + AAAA (DNS-only, no CF proxy) |
 
 ### Router Port Forwarding Rules
 
@@ -533,14 +538,16 @@ Adminer and mongo-ui are only accessible through the admin panel (internal Docke
 |---|---|---|---|
 | 27018 | 27018 | TCP | Pi's local IP |
 | 5433 | 5433 | TCP | Pi's local IP |
+| 6380 | 6380 | TCP | Pi's local IP |
 
 ### Security Layers for Exposed DB Ports
 
-- Non-default ports (27018, 5433) to reduce automated scanning
-- TLS required on both databases
+- Non-default ports (27018, 5433, 6380) to reduce automated scanning
+- TLS required on PostgreSQL and MongoDB
+- Redis uses per-project ACL users restricted to their project key prefix
 - Strong auth credentials
 - fail2ban on the Pi monitoring auth failures
-- UFW firewall: only allow 22 (SSH), 27018, 5433; all other ports blocked (HTTP services go through Cloudflare Tunnel, not host ports)
+- UFW firewall: only allow 22 (SSH), 27018, 5433, 6380; all other ports blocked (HTTP services go through Cloudflare Tunnel, not host ports)
 
 ---
 

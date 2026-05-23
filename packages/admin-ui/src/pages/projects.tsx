@@ -786,7 +786,7 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
           <Skeleton className="h-32" />
         ) : (
           <div className="space-y-3">
-            {(["postgres", "mongodb"] as const).map((type) => (
+            {(["postgres", "mongodb", "redis"] as const).map((type) => (
               <DatabaseCard
                 key={type}
                 type={type}
@@ -855,9 +855,9 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
             <AlertDialogTitle>Deprovision database</AlertDialogTitle>
             <AlertDialogDescription>
               This will permanently drop the{" "}
-              <strong>{deprovisionTarget?.type === "postgres" ? "PostgreSQL" : "MongoDB"}</strong>{" "}
-              database <code>{deprovisionTarget?.dbName}</code> and its user. All data will be lost.
-              This cannot be undone.
+              <strong>{getDatabaseLabel(deprovisionTarget?.type)}</strong> resource{" "}
+              <code>{deprovisionTarget?.dbName}</code> and its user. All data will be lost. This
+              cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1126,7 +1126,7 @@ function DatabaseCard({
   onProvisioned,
   onDeprovision,
 }: {
-  type: "postgres" | "mongodb";
+  type: "postgres" | "mongodb" | "redis";
   database: ProjectDatabase | null;
   projectId: string;
   onProvisioned: () => void;
@@ -1136,7 +1136,7 @@ function DatabaseCard({
   const [showPassword, setShowPassword] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  const label = type === "postgres" ? "PostgreSQL" : "MongoDB";
+  const label = getDatabaseLabel(type);
 
   async function handleProvision() {
     setProvisioning(true);
@@ -1233,6 +1233,27 @@ function DatabaseCard({
             </div>
           ))}
 
+          {database.keyPrefix && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground w-16 shrink-0">Prefix</span>
+              <code className="flex-1 text-xs bg-muted px-2 py-1 rounded font-mono truncate">
+                {database.keyPrefix}
+              </code>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => copy(database.keyPrefix ?? "", `prefix-${type}`)}
+              >
+                {copiedKey === `prefix-${type}` ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
+          )}
+
           <p className="text-xs text-muted-foreground">
             Provisioned {formatDate(database.createdAt)}
           </p>
@@ -1246,6 +1267,13 @@ function DatabaseCard({
       )}
     </div>
   );
+}
+
+function getDatabaseLabel(type?: ProjectDatabase["type"]): string {
+  if (type === "postgres") return "PostgreSQL";
+  if (type === "mongodb") return "MongoDB";
+  if (type === "redis") return "Redis";
+  return "database";
 }
 
 function CreateCollectionDialog({

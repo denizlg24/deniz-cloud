@@ -114,6 +114,30 @@ services:
     healthcheck:
       disable: true
 
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    networks: [internal]
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: >
+      redis-server
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      --maxmemory ${REDIS_MAXMEMORY:-128mb}
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - ${REDIS_DATA_DIR:-./data/redis}:/data
+    mem_limit: 160m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   adminer:
     image: adminer:latest
     networks: [internal]
@@ -195,6 +219,9 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
       MONGODB_URI: mongodb://${MONGO_SYNC_USER:-sync_reader}:${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}@mongodb:27017/?authSource=admin&directConnection=true
       MONGODB_ADMIN_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
+      REDIS_ADMIN_URL: redis://default:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      REDIS_INTERNAL_HOST: redis:6379
+      REDIS_EXTERNAL_HOST: redis.denizlg24.com:6380
       TERMINAL_SERVER_URL: ws://terminal-server:3003
       BACKUP_DIR: /backups
       POSTGRES_USER: ${POSTGRES_USER}
@@ -215,6 +242,8 @@ services:
       postgres:
         condition: service_healthy
       mongodb:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       meilisearch:
         condition: service_started

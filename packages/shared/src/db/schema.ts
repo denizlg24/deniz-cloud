@@ -154,7 +154,7 @@ export const apiKeys = pgTable(
 export const syncStatusEnum = pgEnum("sync_status", ["idle", "syncing", "error"]);
 export type SyncStatus = (typeof syncStatusEnum.enumValues)[number];
 
-export const dbTypeEnum = pgEnum("db_type", ["postgres", "mongodb"]);
+export const dbTypeEnum = pgEnum("db_type", ["postgres", "mongodb", "redis"]);
 export type DbType = (typeof dbTypeEnum.enumValues)[number];
 
 export const collectionSourceTypeEnum = pgEnum("collection_source_type", ["mongodb", "postgres"]);
