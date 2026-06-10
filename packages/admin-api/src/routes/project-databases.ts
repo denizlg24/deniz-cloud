@@ -188,10 +188,10 @@ function formatRecord(
           internal: buildPgUri(record.username, password, pgInternal, record.dbName),
           external: buildPgUri(record.username, password, pgExternal, record.dbName),
         }
-        : {
-            internal: buildMongoUri(record.username, password, mongoInternal, record.dbName),
-            external: buildMongoUri(record.username, password, mongoExternal, record.dbName),
-          };
+      : {
+          internal: buildMongoUri(record.username, password, mongoInternal, record.dbName),
+          external: buildMongoUri(record.username, password, mongoExternal, record.dbName),
+        };
   if (record.type === "redis") {
     return {
       ...rest,
