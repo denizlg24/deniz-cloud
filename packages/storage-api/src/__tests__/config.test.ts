@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
 
 describe("storage-api config shape", () => {
@@ -29,10 +30,10 @@ describe("storage-api config shape", () => {
     expect(parseInt("95", 10)).toBe(95);
   });
 
-  it("tempUploadPath has a sensible default", () => {
-    const defaultPath = "/tmp/deniz-cloud-uploads";
-    expect(defaultPath).toContain("deniz-cloud");
-    expect(defaultPath).toStartWith("/tmp");
+  it("tempUploadPath defaults to a hidden dir under the SSD storage path", () => {
+    const ssdStoragePath = "/data/ssd";
+    const defaultPath = join(ssdStoragePath, ".tus-partial");
+    expect(defaultPath.replaceAll("\\", "/")).toBe("/data/ssd/.tus-partial");
   });
 
   it("requires storage-specific env vars", () => {
