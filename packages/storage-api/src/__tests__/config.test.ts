@@ -1,5 +1,5 @@
-import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
+import { join } from "node:path";
 
 describe("storage-api config shape", () => {
   it("defines the expected config fields", () => {
