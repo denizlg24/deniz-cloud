@@ -69,7 +69,7 @@ export function DeleteDialog({ target, onClose }: DeleteDialogProps) {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete {target?.type}?</AlertDialogTitle>
-          <AlertDialogDescription>
+          <AlertDialogDescription className="break-words">
             Are you sure you want to delete &quot;{target?.name}&quot;? This action cannot be
             undone.
           </AlertDialogDescription>

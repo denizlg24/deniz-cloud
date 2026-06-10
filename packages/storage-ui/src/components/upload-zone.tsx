@@ -1,10 +1,24 @@
-import { CheckCircleIcon, FileIcon, UploadCloudIcon, XCircleIcon, XIcon } from "lucide-react";
+import {
+  CheckCircleIcon,
+  FileIcon,
+  FolderUpIcon,
+  UploadCloudIcon,
+  XCircleIcon,
+  XIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useFolderCache } from "@/hooks/use-folder-cache";
+import {
+  buildFolderHierarchy,
+  collectFromDataTransfer,
+  collectFromFileList,
+  dataTransferHasDirectory,
+  type FileTreeEntry,
+} from "@/lib/folder-upload";
 import { formatBytes } from "@/lib/format";
 import { createTusUpload } from "@/lib/tus";
 import { cn } from "@/lib/utils";
@@ -12,6 +26,8 @@ import { cn } from "@/lib/utils";
 interface UploadEntry {
   id: string;
   file: File;
+  displayName: string;
+  targetFolderPath: string;
   progress: number;
   status: "pending" | "uploading" | "completed" | "error";
   error: string | null;
@@ -28,7 +44,9 @@ interface UploadZoneProps {
 export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZoneProps) {
   const [uploads, setUploads] = useState<UploadEntry[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isPreparingFolders, setIsPreparingFolders] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const { invalidateFolder } = useFolderCache();
 
   const startUpload = useCallback(
@@ -39,7 +57,7 @@ export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZ
 
       createTusUpload(
         entry.file,
-        folderPath,
+        entry.targetFolderPath,
         (uploaded, total) => {
           const progress = Math.round((uploaded / total) * 100);
           setUploads((prev) => prev.map((u) => (u.id === entry.id ? { ...u, progress } : u)));
@@ -63,7 +81,7 @@ export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZ
           );
         });
     },
-    [folderPath, folderId, invalidateFolder],
+    [folderId, invalidateFolder],
   );
 
   const addFiles = useCallback(
@@ -71,6 +89,8 @@ export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZ
       const newEntries: UploadEntry[] = Array.from(files).map((file) => ({
         id: crypto.randomUUID(),
         file,
+        displayName: file.name,
+        targetFolderPath: folderPath,
         progress: 0,
         status: "pending" as const,
         error: null,
@@ -82,18 +102,53 @@ export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZ
         startUpload(entry);
       }
     },
-    [startUpload],
+    [folderPath, startUpload],
+  );
+
+  const addFileTree = useCallback(
+    async (treeEntries: FileTreeEntry[]) => {
+      if (treeEntries.length === 0) return;
+      setIsPreparingFolders(true);
+      try {
+        const resolved = await buildFolderHierarchy(treeEntries, { folderId, folderPath });
+        invalidateFolder(folderId);
+
+        const newEntries: UploadEntry[] = resolved.map((item) => ({
+          id: crypto.randomUUID(),
+          file: item.file,
+          displayName: item.displayPath,
+          targetFolderPath: item.targetFolderPath,
+          progress: 0,
+          status: "pending" as const,
+          error: null,
+          abortController: new AbortController(),
+        }));
+
+        setUploads((prev) => [...prev, ...newEntries]);
+        for (const entry of newEntries) {
+          startUpload(entry);
+        }
+      } catch (err) {
+        invalidateFolder(folderId);
+        toast.error(err instanceof Error ? err.message : "Failed to create folders");
+      } finally {
+        setIsPreparingFolders(false);
+      }
+    },
+    [folderId, folderPath, invalidateFolder, startUpload],
   );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragOver(false);
-      if (e.dataTransfer.files.length > 0) {
+      if (e.dataTransfer.items.length > 0 && dataTransferHasDirectory(e.dataTransfer.items)) {
+        void collectFromDataTransfer(e.dataTransfer.items).then(addFileTree);
+      } else if (e.dataTransfer.files.length > 0) {
         addFiles(e.dataTransfer.files);
       }
     },
-    [addFiles],
+    [addFiles, addFileTree],
   );
 
   const handleFileSelect = useCallback(
@@ -104,6 +159,16 @@ export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZ
       }
     },
     [addFiles],
+  );
+
+  const handleFolderSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) {
+        void addFileTree(collectFromFileList(e.target.files));
+        e.target.value = "";
+      }
+    },
+    [addFileTree],
   );
 
   const cancelUpload = useCallback((id: string) => {
@@ -118,7 +183,8 @@ export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZ
     setUploads((prev) => prev.filter((u) => u.status !== "completed"));
   }, []);
 
-  const hasActive = uploads.some((u) => u.status === "uploading" || u.status === "pending");
+  const hasActive =
+    isPreparingFolders || uploads.some((u) => u.status === "uploading" || u.status === "pending");
   const hasCompleted = uploads.some((u) => u.status === "completed");
   const allSucceeded =
     uploads.length > 0 && !hasActive && uploads.every((u) => u.status === "completed");
@@ -159,18 +225,39 @@ export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZ
         >
           <UploadCloudIcon className="size-8 text-muted-foreground" />
           <div className="text-center">
-            <p className="text-sm font-medium">Drop files here</p>
+            <p className="text-sm font-medium">Drop files or folders here</p>
             <p className="text-xs text-muted-foreground">or</p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-            Browse files
-          </Button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+              Browse files
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isPreparingFolders}
+              onClick={() => folderInputRef.current?.click()}
+            >
+              <FolderUpIcon className="size-3.5" />
+              {isPreparingFolders ? "Preparing..." : "Upload folder"}
+            </Button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
             multiple
             className="hidden"
             onChange={handleFileSelect}
+          />
+          <input
+            ref={(el) => {
+              folderInputRef.current = el;
+              el?.setAttribute("webkitdirectory", "");
+            }}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleFolderSelect}
           />
         </div>
 
@@ -190,13 +277,13 @@ export function UploadZone({ open, onOpenChange, folderId, folderPath }: UploadZ
                 </button>
               )}
             </div>
-            <ScrollArea className="max-h-48">
+            <div className="max-h-48 overflow-y-auto">
               <div className="space-y-2 pr-3">
                 {uploads.map((upload) => (
                   <UploadRow key={upload.id} upload={upload} onCancel={cancelUpload} />
                 ))}
               </div>
-            </ScrollArea>
+            </div>
           </div>
         )}
       </DialogContent>
@@ -217,14 +304,21 @@ function UploadRow({ upload, onCancel }: { upload: UploadEntry; onCancel: (id: s
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium">{upload.file.name}</p>
+        <p className="truncate text-xs font-medium" title={upload.displayName}>
+          {upload.displayName}
+        </p>
         <div className="flex items-center gap-2">
           {upload.status === "error" ? (
             <p className="truncate text-[10px] text-destructive">{upload.error}</p>
           ) : upload.status === "completed" ? (
             <p className="text-[10px] text-muted-foreground">{formatBytes(upload.file.size)}</p>
           ) : (
-            <Progress value={upload.progress} className="h-1 flex-1" />
+            <>
+              <Progress value={upload.progress} className="h-1 flex-1" />
+              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                {upload.progress}%
+              </span>
+            </>
           )}
         </div>
       </div>

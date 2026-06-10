@@ -64,9 +64,11 @@ export function ShareDialog({ file, onClose }: ShareDialogProps) {
     <Dialog open={file !== null} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <LinkIcon className="size-4" />
-            Share "{file?.filename}"
+          <DialogTitle className="flex min-w-0 items-center gap-2">
+            <LinkIcon className="size-4 shrink-0" />
+            <span className="truncate" title={file?.filename}>
+              Share "{file?.filename}"
+            </span>
           </DialogTitle>
         </DialogHeader>
 
