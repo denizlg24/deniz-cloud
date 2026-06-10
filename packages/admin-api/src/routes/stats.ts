@@ -3,7 +3,7 @@ import { cpus, freemem, totalmem } from "node:os";
 import type { Database } from "@deniz-cloud/shared/db";
 import { files, folders, sessions, users } from "@deniz-cloud/shared/db/schema";
 import type { AuthVariables } from "@deniz-cloud/shared/middleware";
-import { count, eq, gt, sum } from "drizzle-orm";
+import { count, desc, eq, gt, sum } from "drizzle-orm";
 import { Hono } from "hono";
 import { config } from "../config.js";
 
@@ -272,6 +272,49 @@ export function statsRoutes({ db }: StatsRouteDeps) {
         timestamp: new Date().toISOString(),
       },
     });
+  });
+
+  app.get("/storage/users", async (c) => {
+    const rows = await db
+      .select({
+        userId: users.id,
+        username: users.username,
+        fileCount: count(files.id),
+        totalSizeBytes: sum(files.sizeBytes),
+      })
+      .from(users)
+      .leftJoin(files, eq(files.ownerId, users.id))
+      .groupBy(users.id, users.username)
+      .orderBy(desc(sum(files.sizeBytes)));
+
+    return c.json({
+      data: rows.map((row) => ({
+        userId: row.userId,
+        username: row.username,
+        fileCount: row.fileCount,
+        totalSizeBytes: parseInt(String(row.totalSizeBytes ?? "0"), 10),
+      })),
+    });
+  });
+
+  app.get("/storage/largest", async (c) => {
+    const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") ?? "20", 10) || 20));
+
+    const rows = await db
+      .select({
+        id: files.id,
+        filename: files.filename,
+        path: files.path,
+        sizeBytes: files.sizeBytes,
+        tier: files.tier,
+        ownerUsername: users.username,
+      })
+      .from(files)
+      .innerJoin(users, eq(files.ownerId, users.id))
+      .orderBy(desc(files.sizeBytes))
+      .limit(limit);
+
+    return c.json({ data: rows });
   });
 
   return app;

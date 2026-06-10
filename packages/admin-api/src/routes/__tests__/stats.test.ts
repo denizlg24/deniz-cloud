@@ -543,6 +543,92 @@ describe("GET /storage — response contract", () => {
   });
 });
 
+describe("GET /storage/users — response contract", () => {
+  interface UserStorageRow {
+    userId: string;
+    username: string;
+    fileCount: number;
+    totalSizeBytes: string | null;
+  }
+
+  function createUsersStatsApp(rows: UserStorageRow[]) {
+    const app = new Hono();
+    app.get("/storage/users", async (c) => {
+      return c.json({
+        data: rows.map((row) => ({
+          userId: row.userId,
+          username: row.username,
+          fileCount: row.fileCount,
+          totalSizeBytes: parseInt(String(row.totalSizeBytes ?? "0"), 10),
+        })),
+      });
+    });
+    return app;
+  }
+
+  it("returns per-user rows with numeric totals", async () => {
+    const app = createUsersStatsApp([
+      { userId: "u1", username: "alice", fileCount: 10, totalSizeBytes: "1048576" },
+      { userId: "u2", username: "bob", fileCount: 0, totalSizeBytes: null },
+    ]);
+    const res = await app.request("/storage/users");
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.data).toHaveLength(2);
+    expect(body.data[0]).toEqual({
+      userId: "u1",
+      username: "alice",
+      fileCount: 10,
+      totalSizeBytes: 1048576,
+    });
+  });
+
+  it("maps null sum (user without files) to 0 bytes", async () => {
+    const app = createUsersStatsApp([
+      { userId: "u2", username: "bob", fileCount: 0, totalSizeBytes: null },
+    ]);
+    const res = await app.request("/storage/users");
+    const body = await res.json();
+    expect(body.data[0].totalSizeBytes).toBe(0);
+    expect(body.data[0].fileCount).toBe(0);
+  });
+
+  it("returns empty array when there are no users", async () => {
+    const app = createUsersStatsApp([]);
+    const res = await app.request("/storage/users");
+    const body = await res.json();
+    expect(body.data).toEqual([]);
+  });
+});
+
+describe("GET /storage/largest — limit clamping", () => {
+  function clampLimit(raw: string | undefined): number {
+    return Math.min(100, Math.max(1, parseInt(raw ?? "20", 10) || 20));
+  }
+
+  it("defaults to 20 when no limit given", () => {
+    expect(clampLimit(undefined)).toBe(20);
+  });
+
+  it("caps limit at 100", () => {
+    expect(clampLimit("5000")).toBe(100);
+  });
+
+  it("floors limit at 1", () => {
+    expect(clampLimit("0")).toBe(20);
+    expect(clampLimit("-5")).toBe(1);
+  });
+
+  it("falls back to 20 for non-numeric input", () => {
+    expect(clampLimit("abc")).toBe(20);
+  });
+
+  it("passes through valid values", () => {
+    expect(clampLimit("50")).toBe(50);
+  });
+});
+
 describe("sum(sizeBytes) parsing — parseInt fallback for null", () => {
   it("returns 0 for null sum result", () => {
     const sumResult: string | null = null;

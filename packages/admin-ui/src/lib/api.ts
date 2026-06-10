@@ -172,6 +172,32 @@ export async function getStorageStats(): Promise<StorageStats> {
   return res.data;
 }
 
+export interface UserStorageStat {
+  userId: string;
+  username: string;
+  fileCount: number;
+  totalSizeBytes: number;
+}
+
+export interface LargestFile {
+  id: string;
+  filename: string;
+  path: string;
+  sizeBytes: number;
+  tier: "ssd" | "hdd";
+  ownerUsername: string;
+}
+
+export async function getUserStorageStats(): Promise<UserStorageStat[]> {
+  const res = await request<{ data: UserStorageStat[] }>("/stats/storage/users");
+  return res.data;
+}
+
+export async function getLargestFiles(limit = 20): Promise<LargestFile[]> {
+  const res = await request<{ data: LargestFile[] }>(`/stats/storage/largest?limit=${limit}`);
+  return res.data;
+}
+
 export interface Project {
   id: string;
   name: string;
