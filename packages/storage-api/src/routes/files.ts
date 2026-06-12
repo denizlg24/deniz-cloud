@@ -201,7 +201,7 @@ export function fileRoutes({ db, meili, ssdStoragePath, jwtSecret }: FileRouteDe
           });
         }
 
-        return new Response(bunFile.slice(start, end + 1).stream(), {
+        return new Response(bunFile.slice(start, end + 1), {
           status: 206,
           headers: {
             "Content-Type": contentType,
@@ -213,7 +213,7 @@ export function fileRoutes({ db, meili, ssdStoragePath, jwtSecret }: FileRouteDe
       }
     }
 
-    return new Response(bunFile.stream(), {
+    return new Response(bunFile, {
       headers: {
         "Content-Type": contentType,
         "Content-Length": String(file.sizeBytes),

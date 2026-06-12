@@ -103,5 +103,8 @@ app.get("*", serveStatic({ root: "./static", rewriteRequestPath: () => "/index.h
 
 export default {
   port: config.port,
+  // Bun.serve defaults to a 10s idle timeout, which aborts large downloads
+  // whenever the client stalls (slow link, paused transfer). 0 disables it.
+  idleTimeout: 0,
   fetch: app.fetch,
 };
