@@ -28,6 +28,11 @@ interface BreadcrumbSegment {
   name: string;
 }
 
+interface SearchResult {
+  key: string;
+  hits: SearchHit[];
+}
+
 export function FileBrowser() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { roots, isLoading: rootsLoading } = useRoots();
@@ -42,8 +47,7 @@ export function FileBrowser() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [search, setSearch] = useState("");
 
-  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
 
@@ -54,13 +58,9 @@ export function FileBrowser() {
     if (searchAbortRef.current) searchAbortRef.current.abort();
 
     const query = search.trim();
-    if (query.length < 2) {
-      setSearchHits([]);
-      setSearchLoading(false);
-      return;
-    }
+    if (query.length < 2) return;
 
-    setSearchLoading(true);
+    const key = `${activeRoot}:${query}`;
     const abort = new AbortController();
     searchAbortRef.current = abort;
 
@@ -69,14 +69,12 @@ export function FileBrowser() {
       searchFiles(query, activeRoot, 1, 50)
         .then((res) => {
           if (!abort.signal.aborted) {
-            setSearchHits(res.hits);
-            setSearchLoading(false);
+            setSearchResult({ key, hits: res.hits });
           }
         })
         .catch(() => {
           if (!abort.signal.aborted) {
-            setSearchHits([]);
-            setSearchLoading(false);
+            setSearchResult({ key, hits: [] });
           }
         });
     }, 300);
@@ -86,6 +84,10 @@ export function FileBrowser() {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     };
   }, [search, activeRoot]);
+
+  const searchKey = `${activeRoot}:${search.trim()}`;
+  const searchHits = searchResult?.key === searchKey ? searchResult.hits : [];
+  const searchLoading = isSearchActive && searchResult?.key !== searchKey;
 
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbSegment[]>([]);
 

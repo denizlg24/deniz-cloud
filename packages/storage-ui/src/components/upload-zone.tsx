@@ -307,14 +307,14 @@ function UploadRow({ upload, onCancel }: { upload: UploadEntry; onCancel: (id: s
         <p className="truncate text-xs font-medium" title={upload.displayName}>
           {upload.displayName}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {upload.status === "error" ? (
-            <p className="truncate text-[10px] text-destructive">{upload.error}</p>
+            <p className="min-w-0 truncate text-[10px] text-destructive">{upload.error}</p>
           ) : upload.status === "completed" ? (
             <p className="text-[10px] text-muted-foreground">{formatBytes(upload.file.size)}</p>
           ) : (
             <>
-              <Progress value={upload.progress} className="h-1 flex-1" />
+              <Progress value={upload.progress} className="h-1 min-w-0 flex-1" />
               <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
                 {upload.progress}%
               </span>

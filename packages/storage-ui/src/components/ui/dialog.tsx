@@ -52,7 +52,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed inset-0 z-50 grid w-full bg-background text-sm outline-none duration-100 gap-6 p-6 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:max-w-[calc(100%-2rem)] sm:rounded-xl sm:ring-1 sm:ring-foreground/10 sm:data-open:zoom-in-95 sm:data-closed:zoom-out-95",
+          "fixed inset-0 z-50 grid min-w-0 w-full bg-background text-sm outline-none duration-100 gap-6 p-6 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 *:min-w-0 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:max-w-[calc(100%-2rem)] sm:rounded-xl sm:ring-1 sm:ring-foreground/10 sm:data-open:zoom-in-95 sm:data-closed:zoom-out-95",
           className,
         )}
         {...props}
@@ -73,7 +73,11 @@ function DialogContent({
 
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <div data-slot="dialog-header" className={cn("flex flex-col gap-2", className)} {...props} />
+    <div
+      data-slot="dialog-header"
+      className={cn("flex min-w-0 flex-col gap-2 pr-8", className)}
+      {...props}
+    />
   );
 }
 
@@ -105,7 +109,7 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("leading-none font-medium", className)}
+      className={cn("min-w-0 max-w-full leading-none font-medium wrap-break-word", className)}
       {...props}
     />
   );
@@ -119,7 +123,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot="dialog-description"
       className={cn(
-        "text-sm text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
+        "min-w-0 max-w-full text-sm text-muted-foreground wrap-break-word *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
         className,
       )}
       {...props}

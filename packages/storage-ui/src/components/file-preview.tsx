@@ -21,10 +21,12 @@ export function FilePreview({ file, onClose, onDownload }: FilePreviewProps) {
       <DialogContent className="sm:max-w-4xl sm:h-[85vh] flex flex-col gap-0 p-0 overflow-hidden">
         <DialogTitle className="sr-only">{file.filename}</DialogTitle>
 
-        <div className="flex items-center gap-3 border-b px-4 py-3 pr-12">
-          <FileIconDisplay mimeType={file.mimeType} />
+        <div className="flex min-w-0 items-center gap-3 border-b px-4 py-3 pr-12">
+          <FileIconDisplay mimeType={file.mimeType} className="shrink-0" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{file.filename}</p>
+            <p className="truncate text-sm font-medium" title={file.filename}>
+              {file.filename}
+            </p>
             <p className="text-xs text-muted-foreground">{formatBytes(file.sizeBytes)}</p>
           </div>
         </div>
@@ -90,8 +92,10 @@ function PreviewContent({ file }: { file: StorageFile }) {
       return (
         <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
           <FileIconDisplay mimeType={file.mimeType} className="size-16" />
-          <div>
-            <p className="text-sm font-medium">{file.filename}</p>
+          <div className="min-w-0 max-w-full">
+            <p className="truncate text-sm font-medium" title={file.filename}>
+              {file.filename}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">
               Preview not available for this file type
             </p>

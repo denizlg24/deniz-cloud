@@ -3,9 +3,9 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ActiveRootProvider } from "@/hooks/use-active-root";
-import { FolderCacheProvider } from "@/hooks/use-folder-cache";
-import { AuthProvider } from "@/lib/auth";
+import { ActiveRootProvider } from "@/hooks/active-root-provider";
+import { FolderCacheProvider } from "@/hooks/folder-cache-provider";
+import { AuthProvider } from "@/lib/auth-provider";
 import { App } from "./App";
 import "./index.css";
 

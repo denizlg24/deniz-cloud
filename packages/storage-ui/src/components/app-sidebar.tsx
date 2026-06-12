@@ -11,8 +11,8 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@/components/ui/sidebar";
+import { useSidebar } from "@/components/ui/sidebar-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useActiveRoot } from "@/hooks/use-active-root";
 import { useRoots } from "@/hooks/use-folder-cache";

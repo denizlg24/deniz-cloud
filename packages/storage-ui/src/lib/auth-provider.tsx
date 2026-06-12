@@ -1,18 +1,6 @@
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
-import { logout as apiLogout, getMe, type SafeUser } from "./api";
-
-interface AuthState {
-  user: SafeUser | null;
-  isLoading: boolean;
-  isAuthenticated: boolean;
-}
-
-interface AuthContextValue extends AuthState {
-  setUser: (user: SafeUser) => void;
-  logout: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
+import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { logout as apiLogout, getMe, type SafeUser } from "@/lib/api";
+import { AuthContext, type AuthState } from "@/lib/auth-context";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
@@ -39,7 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await apiLogout();
     } catch {
-      // logout even if the API call fails
+      // Log out locally even if the API call fails.
     }
     setState({ user: null, isLoading: false, isAuthenticated: false });
   }, []);
@@ -47,12 +35,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{ ...state, setUser, logout }}>{children}</AuthContext.Provider>
   );
-}
-
-export function useAuth(): AuthContextValue {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
 }
