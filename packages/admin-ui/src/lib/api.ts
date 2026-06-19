@@ -893,6 +893,17 @@ export async function getTaskRuns(
   return request<TaskRunsListResponse>(`/tasks/${taskId}/runs?page=${page}&limit=${limit}`);
 }
 
+export async function deleteTaskRunsApi(taskId: string): Promise<number> {
+  const res = await request<{ data: { deleted: number } }>(`/tasks/${taskId}/runs`, {
+    method: "DELETE",
+  });
+  return res.data.deleted;
+}
+
+export async function deleteTaskRunApi(taskId: string, runId: string): Promise<void> {
+  await request(`/tasks/${taskId}/runs/${runId}`, { method: "DELETE" });
+}
+
 export interface MongoFindResult {
   documents: Record<string, unknown>[];
   totalCount: number;

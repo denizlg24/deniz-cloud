@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db";
 import {
   scheduledTasks,
@@ -28,6 +28,7 @@ export async function createTask(
       type: input.type,
       cronExpression: input.cronExpression,
       scheduledAt: input.scheduledAt,
+      nextRunAt: input.scheduledAt,
       config: input.config ?? {},
       createdBy: input.createdBy,
     })
@@ -181,6 +182,42 @@ export async function listTaskRuns(
     runs: allRuns,
     total: countResult[0]?.count ?? 0,
   };
+}
+
+export async function deleteTaskRuns(db: Database, taskId: string): Promise<number> {
+  const deleted = await db
+    .delete(taskRuns)
+    .where(eq(taskRuns.taskId, taskId))
+    .returning({ id: taskRuns.id });
+
+  return deleted.length;
+}
+
+export async function deleteTaskRun(db: Database, taskId: string, runId: string): Promise<void> {
+  const deleted = await db
+    .delete(taskRuns)
+    .where(and(eq(taskRuns.id, runId), eq(taskRuns.taskId, taskId)))
+    .returning({ id: taskRuns.id });
+
+  if (deleted.length === 0) {
+    throw new AuthError("Task run not found", "TASK_RUN_NOT_FOUND", 404);
+  }
+}
+
+export async function markInterruptedTaskRuns(db: Database): Promise<number> {
+  const now = new Date();
+  const updated = await db
+    .update(taskRuns)
+    .set({
+      status: "failed",
+      completedAt: now,
+      error:
+        "Task execution was interrupted before completion. The admin service likely restarted.",
+    })
+    .where(inArray(taskRuns.status, ["pending", "running"]))
+    .returning({ id: taskRuns.id });
+
+  return updated.length;
 }
 
 export async function getLatestTaskRuns(db: Database): Promise<SafeTaskRun[]> {

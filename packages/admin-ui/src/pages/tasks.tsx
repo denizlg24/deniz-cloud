@@ -60,6 +60,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import {
   createTask,
   deleteTaskApi,
+  deleteTaskRunApi,
+  deleteTaskRunsApi,
   getTaskRuns,
   getTasks,
   runTaskNow,
@@ -117,6 +119,7 @@ export function TasksPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ScheduledTask | null>(null);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const [runHistoryRefreshKey, setRunHistoryRefreshKey] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -159,6 +162,8 @@ export function TasksPage() {
     try {
       await runTaskNow(task.id);
       toast.success(`Started "${task.name}"`);
+      setRunHistoryRefreshKey((key) => key + 1);
+      refresh();
     } catch {
       toast.error("Failed to start task");
     }
@@ -232,6 +237,7 @@ export function TasksPage() {
                   onToggleEnabled={() => handleToggle(task)}
                   onRunNow={() => handleRunNow(task)}
                   onDelete={() => setDeleteTarget(task)}
+                  runHistoryRefreshKey={runHistoryRefreshKey}
                 />
               );
             })}
@@ -278,6 +284,7 @@ function TaskRowGroup({
   onToggleEnabled,
   onRunNow,
   onDelete,
+  runHistoryRefreshKey,
 }: {
   task: ScheduledTask;
   icon: typeof Database;
@@ -286,6 +293,7 @@ function TaskRowGroup({
   onToggleEnabled: () => void;
   onRunNow: () => void;
   onDelete: () => void;
+  runHistoryRefreshKey: number;
 }) {
   return (
     <>
@@ -364,7 +372,7 @@ function TaskRowGroup({
       {isExpanded && (
         <TableRow>
           <TableCell colSpan={7} className="bg-muted/30 p-0">
-            <TaskRunHistory taskId={task.id} />
+            <TaskRunHistory key={runHistoryRefreshKey} taskId={task.id} />
           </TableCell>
         </TableRow>
       )}
@@ -375,13 +383,63 @@ function TaskRowGroup({
 function TaskRunHistory({ taskId }: { taskId: string }) {
   const [runs, setRuns] = useState<TaskRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+
+  const loadRuns = useCallback(
+    async (showLoading = false) => {
+      if (showLoading) setLoading(true);
+      try {
+        const res = await getTaskRuns(taskId);
+        setRuns(res.data);
+      } catch {
+        toast.error("Failed to load run history");
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    },
+    [taskId],
+  );
 
   useEffect(() => {
-    getTaskRuns(taskId)
-      .then((res) => setRuns(res.data))
-      .catch(() => toast.error("Failed to load run history"))
-      .finally(() => setLoading(false));
-  }, [taskId]);
+    loadRuns(true);
+  }, [loadRuns]);
+
+  useEffect(() => {
+    if (!runs.some((run) => run.status === "pending" || run.status === "running")) return;
+
+    const timer = setInterval(() => {
+      loadRuns();
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [loadRuns, runs]);
+
+  async function handleDeleteRun(runId: string) {
+    setDeletingRunId(runId);
+    try {
+      await deleteTaskRunApi(taskId, runId);
+      setRuns((current) => current.filter((run) => run.id !== runId));
+      toast.success("Deleted task log");
+    } catch {
+      toast.error("Failed to delete task log");
+    } finally {
+      setDeletingRunId(null);
+    }
+  }
+
+  async function handleClearLogs() {
+    setClearing(true);
+    try {
+      const deleted = await deleteTaskRunsApi(taskId);
+      setRuns([]);
+      toast.success(`Deleted ${deleted} task log${deleted === 1 ? "" : "s"}`);
+    } catch {
+      toast.error("Failed to clear task logs");
+    } finally {
+      setClearing(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -397,7 +455,19 @@ function TaskRunHistory({ taskId }: { taskId: string }) {
 
   return (
     <div className="px-4 py-3">
-      <h4 className="text-sm font-medium mb-2">Run History</h4>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h4 className="text-sm font-medium">Run History</h4>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 text-destructive hover:text-destructive"
+          onClick={handleClearLogs}
+          disabled={clearing || runs.length === 0}
+        >
+          <Trash2 className="h-3.5 w-3.5 mr-1" />
+          {clearing ? "Clearing..." : "Clear logs"}
+        </Button>
+      </div>
       <div className="space-y-2">
         {runs.map((run) => (
           <div key={run.id} className="rounded border bg-background p-3 text-sm">
@@ -408,11 +478,27 @@ function TaskRunHistory({ taskId }: { taskId: string }) {
                   <span className="text-muted-foreground">{formatDateTime(run.startedAt)}</span>
                 )}
               </div>
-              {run.metadata?.durationMs != null && (
-                <span className="text-muted-foreground">
-                  {formatDuration(run.metadata.durationMs)}
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {run.metadata?.durationMs != null && (
+                  <span className="text-muted-foreground">
+                    {formatDuration(run.metadata.durationMs)}
+                  </span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-destructive hover:text-destructive"
+                  onClick={() => handleDeleteRun(run.id)}
+                  disabled={deletingRunId === run.id}
+                  aria-label="Delete task log"
+                >
+                  {deletingRunId === run.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </div>
             </div>
             {run.metadata?.backupSizeBytes != null && (
               <p className="text-muted-foreground text-xs">

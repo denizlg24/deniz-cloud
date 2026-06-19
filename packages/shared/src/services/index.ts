@@ -41,10 +41,13 @@ export {
   createTask,
   createTaskRun,
   deleteTask,
+  deleteTaskRun,
+  deleteTaskRuns,
   getLatestTaskRuns,
   getTask,
   listTaskRuns,
   listTasks,
+  markInterruptedTaskRuns,
   updateTask,
   updateTaskRun,
 } from "./tasks";

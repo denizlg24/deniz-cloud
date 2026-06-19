@@ -1,15 +1,27 @@
 import type { Database } from "@deniz-cloud/shared/db";
 import type { ScheduledTask } from "@deniz-cloud/shared/db/schema";
 import { scheduledTasks } from "@deniz-cloud/shared/db/schema";
-import { createTaskRun, getTask, updateTask, updateTaskRun } from "@deniz-cloud/shared/services";
+import {
+  createTaskRun,
+  getTask,
+  markInterruptedTaskRuns,
+  updateTask,
+  updateTaskRun,
+} from "@deniz-cloud/shared/services";
 import { Cron } from "croner";
 import { and, eq, isNotNull, lte } from "drizzle-orm";
 import { getExecutor } from "./executors";
 
 const activeCrons = new Map<string, Cron>();
+const activeRuns = new Set<string>();
 let oneOffTimer: ReturnType<typeof setInterval> | null = null;
 
 export async function startScheduler(db: Database): Promise<void> {
+  const interruptedCount = await markInterruptedTaskRuns(db);
+  if (interruptedCount > 0) {
+    console.warn(`[scheduler] Marked ${interruptedCount} interrupted task run(s) as failed`);
+  }
+
   const allTasks = await db.select().from(scheduledTasks).where(eq(scheduledTasks.enabled, true));
 
   for (const task of allTasks) {
@@ -18,7 +30,12 @@ export async function startScheduler(db: Database): Promise<void> {
     }
   }
 
-  oneOffTimer = setInterval(() => pollOneOffTasks(db), 30_000);
+  await pollOneOffTasks(db);
+  oneOffTimer = setInterval(() => {
+    pollOneOffTasks(db).catch((err) => {
+      console.error("[scheduler] Failed to poll one-off tasks:", err);
+    });
+  }, 30_000);
 
   console.log(
     `[scheduler] Started with ${allTasks.filter((t) => t.cronExpression).length} cron task(s)`,
@@ -94,12 +111,22 @@ async function pollOneOffTasks(db: Database): Promise<void> {
 }
 
 export async function runTask(db: Database, taskId: string): Promise<void> {
-  const task = await getTask(db, taskId);
-  const executor = getExecutor(task.type);
+  if (activeRuns.has(taskId)) {
+    console.warn(`[scheduler] Task ${taskId} is already running; skipping duplicate execution`);
+    return;
+  }
 
-  const run = await createTaskRun(db, { taskId, status: "running" });
-
+  activeRuns.add(taskId);
+  let taskName = taskId;
+  let runId: string | null = null;
   try {
+    const task = await getTask(db, taskId);
+    taskName = task.name;
+    const executor = getExecutor(task.type);
+
+    const run = await createTaskRun(db, { taskId, status: "running" });
+    runId = run.id;
+
     const result = await executor(task.config);
 
     await updateTaskRun(db, run.id, {
@@ -108,21 +135,33 @@ export async function runTask(db: Database, taskId: string): Promise<void> {
       metadata: result.metadata,
     });
 
-    if (task.cronExpression) {
-      const cron = activeCrons.get(taskId);
-      const nextRun = cron?.nextRun();
-      if (nextRun) {
-        await updateTask(db, taskId, { nextRunAt: nextRun });
+    try {
+      if (task.cronExpression) {
+        const cron = activeCrons.get(taskId);
+        const nextRun = cron?.nextRun();
+        if (nextRun) {
+          await updateTask(db, taskId, { nextRunAt: nextRun });
+        }
+      } else {
+        await updateTask(db, taskId, { nextRunAt: null, enabled: false });
       }
+    } catch (err) {
+      console.error(`[scheduler] Failed to update schedule metadata for task ${taskId}:`, err);
     }
 
     console.log(`[scheduler] Task "${task.name}" completed successfully`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await updateTaskRun(db, run.id, {
-      status: "failed",
-      error: message,
-    });
-    console.error(`[scheduler] Task "${task.name}" failed:`, message);
+    if (runId) {
+      await updateTaskRun(db, runId, {
+        status: "failed",
+        error: message,
+      }).catch((updateErr) => {
+        console.error(`[scheduler] Failed to update failed run for task ${taskId}:`, updateErr);
+      });
+    }
+    console.error(`[scheduler] Task "${taskName}" failed:`, message);
+  } finally {
+    activeRuns.delete(taskId);
   }
 }
