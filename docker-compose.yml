@@ -127,7 +127,6 @@ services:
     volumes:
       - ${REDIS_DATA_DIR:-./data/redis}:/data
       - ./scripts/infra/redis-acl-entrypoint.sh:/usr/local/bin/redis-acl-entrypoint.sh:ro
-    mem_limit: 160m
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
