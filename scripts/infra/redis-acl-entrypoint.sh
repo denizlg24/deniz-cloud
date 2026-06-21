@@ -9,15 +9,6 @@ ACL_DIR="$(dirname "$ACL_FILE")"
 if [ "$(id -u)" = "0" ]; then
   mkdir -p "$ACL_DIR"
   find "$ACL_DIR" \! -user redis -exec chown redis:redis '{}' + || true
-  if command -v setpriv >/dev/null 2>&1; then
-    exec setpriv --reuid redis --regid redis --clear-groups sh "$0"
-  fi
-  if command -v su-exec >/dev/null 2>&1; then
-    exec su-exec redis sh "$0"
-  fi
-  if command -v gosu >/dev/null 2>&1; then
-    exec gosu redis sh "$0"
-  fi
 fi
 
 umask 0077
