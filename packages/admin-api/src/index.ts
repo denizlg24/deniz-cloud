@@ -14,7 +14,7 @@ import { createProxyHandler } from "./proxy";
 import { authRoutes } from "./routes/auth";
 import { mongoDbRoutes } from "./routes/db-mongodb";
 import { postgresDbRoutes } from "./routes/db-postgres";
-import { projectDatabaseRoutes } from "./routes/project-databases";
+import { projectDatabaseRoutes, syncRedisProjectAclUsers } from "./routes/project-databases";
 import { projectRoutes } from "./routes/projects";
 import { statsRoutes } from "./routes/stats";
 import { taskRoutes } from "./routes/tasks";
@@ -143,6 +143,20 @@ Promise.all([mongoClient.connect(), mongoAdminClient.connect()])
 startScheduler(db).catch((err) => {
   console.error("[admin-api] Scheduler start error:", err);
 });
+
+syncRedisProjectAclUsers({
+  db,
+  redisAdminUrl: config.redisAdminUrl,
+  totpEncryptionKey: config.totpEncryptionKey,
+})
+  .then((count) => {
+    if (count > 0) {
+      console.log(`[admin-api] Synced ${count} Redis project ACL user(s)`);
+    }
+  })
+  .catch((err) => {
+    console.error("[admin-api] Redis ACL sync error:", err);
+  });
 
 let isShuttingDown = false;
 const shutdown = async () => {

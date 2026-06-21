@@ -171,6 +171,78 @@ async function deleteRedisKeys(redis: RedisAdminClient, pattern: string): Promis
   } while (cursor !== "0");
 }
 
+const REDIS_DENIED_COMMANDS = [
+  "-acl",
+  "-config",
+  "-debug",
+  "-flushall",
+  "-flushdb",
+  "-module",
+  "-monitor",
+  "-replicaof",
+  "-save",
+  "-shutdown",
+  "-slaveof",
+];
+
+async function setRedisProjectAclUser(
+  redis: RedisAdminClient,
+  username: string,
+  password: string,
+  keyPrefix: string,
+): Promise<void> {
+  await redis.command(
+    "ACL",
+    "SETUSER",
+    username,
+    "reset",
+    "on",
+    `>${password}`,
+    `~${keyPrefix}:*`,
+    `&${keyPrefix}:*`,
+    "+@all",
+    ...REDIS_DENIED_COMMANDS,
+  );
+}
+
+async function saveRedisAcls(redis: RedisAdminClient): Promise<void> {
+  await redis.command("ACL", "SAVE");
+}
+
+interface RedisAclSyncDeps {
+  db: Database;
+  redisAdminUrl: string;
+  totpEncryptionKey: string;
+}
+
+export async function syncRedisProjectAclUsers({
+  db,
+  redisAdminUrl,
+  totpEncryptionKey,
+}: RedisAclSyncDeps): Promise<number> {
+  const records = await db
+    .select()
+    .from(projectDatabases)
+    .where(eq(projectDatabases.type, "redis"));
+
+  if (records.length === 0) return 0;
+
+  await withRedisAdmin(redisAdminUrl, async (redis) => {
+    for (const record of records) {
+      const password = decryptTotpSecret(
+        record.encryptedPassword,
+        record.iv,
+        record.authTag,
+        totpEncryptionKey,
+      );
+      await setRedisProjectAclUser(redis, record.username, password, record.dbName);
+    }
+    await saveRedisAcls(redis);
+  });
+
+  return records.length;
+}
+
 function formatRecord(
   record: typeof projectDatabases.$inferSelect,
   password: string,
@@ -283,27 +355,8 @@ export function projectDatabaseRoutes({
       });
     } else {
       await withRedisAdmin(redisAdminUrl, async (redis) => {
-        await redis.command(
-          "ACL",
-          "SETUSER",
-          identifier,
-          "on",
-          `>${password}`,
-          `~${identifier}:*`,
-          `&${identifier}:*`,
-          "+@all",
-          "-acl",
-          "-config",
-          "-debug",
-          "-flushall",
-          "-flushdb",
-          "-module",
-          "-monitor",
-          "-replicaof",
-          "-save",
-          "-shutdown",
-          "-slaveof",
-        );
+        await setRedisProjectAclUser(redis, identifier, password, identifier);
+        await saveRedisAcls(redis);
       });
     }
 
@@ -399,6 +452,7 @@ export function projectDatabaseRoutes({
       await withRedisAdmin(redisAdminUrl, async (redis) => {
         await deleteRedisKeys(redis, `${record.dbName}:*`);
         await redis.command("ACL", "DELUSER", record.username);
+        await saveRedisAcls(redis);
       });
     }
 

@@ -108,14 +108,11 @@ services:
       - "${REDIS_PORT:-6380}:6379"
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-    command: >
-      redis-server
-      --appendonly yes
-      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-      --maxmemory ${REDIS_MAXMEMORY:-128mb}
-      --maxmemory-policy allkeys-lru
+      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-128mb}
+    entrypoint: ["sh", "/usr/local/bin/redis-acl-entrypoint.sh"]
     volumes:
       - ./data/redis:/data
+      - ./scripts/infra/redis-acl-entrypoint.sh:/usr/local/bin/redis-acl-entrypoint.sh:ro
     mem_limit: 160m
     restart: unless-stopped
     healthcheck:
