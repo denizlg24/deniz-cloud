@@ -77,7 +77,7 @@ services:
     environment:
       MONGOT_JVM_FLAGS: ${MONGOT_JVM_FLAGS:-}
     volumes:
-      - ./config/mongo/mongot.yml:/mongot-community/config.default.yml:ro
+      - ./scripts/infra/mongot.yml:/mongot-community/config.default.yml:ro
       - mongot-secrets:/etc/mongot/secrets:ro
       - ${MONGOT_DATA_DIR:-./data/mongot}:/data/mongot
     entrypoint: ["/bin/bash", "-c", "if [[ -n \"$${MONGOT_JVM_FLAGS}\" ]]; then exec /mongot-community/mongot --config /mongot-community/config.default.yml --jvm-flags \"$${MONGOT_JVM_FLAGS}\"; else exec /mongot-community/mongot --config /mongot-community/config.default.yml; fi"]
