@@ -9,6 +9,7 @@ import { config } from "./config";
 import { authRoutes } from "./routes/auth";
 import { fileRoutes } from "./routes/files";
 import { folderRoutes } from "./routes/folders";
+import { initializeS3, s3Routes } from "./routes/s3";
 import { searchRoutes } from "./routes/search";
 import { shareRoutes } from "./routes/share";
 import { uploadRoutes } from "./routes/uploads";
@@ -17,10 +18,19 @@ import { ensureSharedFolder, initStorageDirs } from "./utils/storage";
 
 const db = createDb(config.databaseUrl);
 const meili = createMeiliClient(config.meiliUrl, config.meiliAdminKey);
+const s3Config = {
+  enabled: config.s3Enabled,
+  accessKeyId: config.s3AccessKeyId,
+  secretAccessKey: config.s3SecretAccessKey,
+  region: config.s3Region,
+  rootPath: config.s3RootPath,
+  tempPath: config.s3TempPath,
+};
 
 await initStorageDirs(config);
 await ensureSharedFolder(db, config);
 await ensureStorageSearchIndex(meili);
+await initializeS3(s3Config);
 startCleanupScheduler(db);
 
 const app = new Hono();
@@ -45,6 +55,7 @@ app.onError((err, c) => {
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 
 app.route("/api/share", shareRoutes({ db, jwtSecret: config.jwtSecret }));
+app.route("/v2", s3Routes(s3Config));
 
 const COOKIE_NAME = "dc_storage_session";
 

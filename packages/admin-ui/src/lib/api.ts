@@ -296,6 +296,29 @@ export async function revokeApiKey(projectId: string, keyId: string): Promise<vo
   });
 }
 
+export type S3Credentials =
+  | {
+      enabled: true;
+      endpoint: string;
+      region: string;
+      accessKeyId: string;
+      secretAccessKey: string;
+      shared: true;
+    }
+  | {
+      enabled: false;
+      endpoint: string;
+      region: string;
+      shared: true;
+    };
+
+export async function getS3Credentials(): Promise<S3Credentials> {
+  const response = await request<{ data: S3Credentials }>("/settings/s3-credentials", {
+    cache: "no-store",
+  });
+  return response.data;
+}
+
 export interface FieldMapping {
   includeFields?: string[];
   excludeFields?: string[];

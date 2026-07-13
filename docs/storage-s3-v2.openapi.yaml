@@ -1,0 +1,711 @@
+openapi: 3.1.0
+info:
+  title: Deniz Cloud S3-compatible Storage API
+  version: 2.0.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  summary: AWS Signature Version 4 compatible object storage under /v2.
+  description: |
+    A path-style S3-compatible API backed by an isolated filesystem store. Configure an
+    S3 SDK with the server URL as its custom endpoint and enable path-style addressing.
+
+    Authentication currently uses one service-wide `S3_ACCESS_KEY_ID` and
+    `S3_SECRET_ACCESS_KEY` pair. The credential is not connected to admin project API
+    keys and can access every bucket exposed by this API.
+
+    S3 dispatches several operations on the same HTTP method and path. Those variants
+    are selected by query parameters or headers and are described on each operation.
+    Object keys may contain `/`; `{key}` is therefore a greedy remainder of the path,
+    even though OpenAPI path parameters cannot formally express greedy matching.
+servers:
+  - url: https://storage.denizlg24.com/v2
+    description: Production
+  - url: http://127.0.0.1:3002/v2
+    description: Local storage service
+tags:
+  - name: Buckets
+    description: Create, inspect, list, and remove buckets.
+  - name: Objects
+    description: Store, retrieve, copy, list, and remove objects.
+  - name: Multipart uploads
+    description: Manage multipart upload lifecycles and parts.
+security:
+  - AwsSigV4Header: []
+  - AwsSigV4PresignedQuery: []
+paths:
+  /:
+    get:
+      tags: [Buckets]
+      operationId: listBuckets
+      summary: List buckets
+      responses:
+        "200":
+          description: Buckets visible to the service-wide credential.
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/ListAllMyBucketsResult"
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+
+  /{bucket}:
+    parameters:
+      - $ref: "#/components/parameters/Bucket"
+    put:
+      tags: [Buckets]
+      operationId: createBucket
+      summary: Create a bucket
+      responses:
+        "200":
+          description: Bucket created.
+          headers:
+            Location:
+              schema: { type: string }
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+    head:
+      tags: [Buckets]
+      operationId: headBucket
+      summary: Check whether a bucket exists
+      responses:
+        "200":
+          description: Bucket exists.
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+    delete:
+      tags: [Buckets]
+      operationId: deleteBucket
+      summary: Delete an empty bucket
+      responses:
+        "204":
+          description: Bucket deleted.
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+    get:
+      tags: [Buckets, Objects, Multipart uploads]
+      operationId: getBucket
+      summary: List objects or multipart uploads
+      description: |
+        Performs `ListObjectsV2` by default. If the `uploads` flag is present, performs
+        `ListMultipartUploads` instead.
+      parameters:
+        - $ref: "#/components/parameters/ListType"
+        - $ref: "#/components/parameters/Prefix"
+        - $ref: "#/components/parameters/Delimiter"
+        - $ref: "#/components/parameters/MaxKeys"
+        - $ref: "#/components/parameters/ContinuationToken"
+        - $ref: "#/components/parameters/StartAfter"
+        - $ref: "#/components/parameters/EncodingType"
+        - $ref: "#/components/parameters/UploadsFlag"
+      responses:
+        "200":
+          description: Object listing, or multipart-upload listing when `uploads` is present.
+          content:
+            application/xml:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ListBucketResult"
+                  - $ref: "#/components/schemas/ListMultipartUploadsResult"
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+    post:
+      tags: [Objects]
+      operationId: deleteObjects
+      summary: Delete multiple objects
+      description: Requires the `delete` query flag. At most 1,000 keys may be supplied.
+      parameters:
+        - $ref: "#/components/parameters/DeleteFlag"
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/DeleteObjectsRequest"
+      responses:
+        "200":
+          description: Delete results. Missing objects are treated as deleted.
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+
+  /{bucket}/{key}:
+    x-deniz-cloud-greedy-path-parameter: key
+    parameters:
+      - $ref: "#/components/parameters/Bucket"
+      - $ref: "#/components/parameters/Key"
+    put:
+      tags: [Objects, Multipart uploads]
+      operationId: putObjectOrPart
+      summary: Put or copy an object, or upload a multipart part
+      description: |
+        Dispatch order:
+
+        * `uploadId` plus `partNumber`: `UploadPart`.
+        * `x-amz-copy-source`: `CopyObject`.
+        * Otherwise: `PutObject`.
+
+        SigV4 `aws-chunked` streaming payloads are not supported. Use a normal signed
+        request body or multipart upload.
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+        - $ref: "#/components/parameters/PartNumber"
+        - $ref: "#/components/parameters/CopySource"
+        - $ref: "#/components/parameters/MetadataDirective"
+        - $ref: "#/components/parameters/ContentType"
+        - $ref: "#/components/parameters/CacheControl"
+        - $ref: "#/components/parameters/ContentDisposition"
+        - $ref: "#/components/parameters/ContentEncoding"
+        - $ref: "#/components/parameters/ContentLanguage"
+        - $ref: "#/components/parameters/Expires"
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Object or part stored. Copy operations return XML.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/CopyObjectResult"
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+    get:
+      tags: [Objects, Multipart uploads]
+      operationId: getObjectOrListParts
+      summary: Get an object or list multipart parts
+      description: With `uploadId`, performs `ListParts`; otherwise performs `GetObject`.
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IfNoneMatch"
+        - $ref: "#/components/parameters/IfModifiedSince"
+        - $ref: "#/components/parameters/IfUnmodifiedSince"
+        - $ref: "#/components/parameters/ResponseContentType"
+        - $ref: "#/components/parameters/ResponseContentDisposition"
+        - $ref: "#/components/parameters/ResponseCacheControl"
+        - $ref: "#/components/parameters/ResponseContentEncoding"
+        - $ref: "#/components/parameters/ResponseContentLanguage"
+        - $ref: "#/components/parameters/ResponseExpires"
+      responses:
+        "200":
+          description: Full object body, or XML part listing when `uploadId` is present.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Last-Modified:
+              schema: { type: string }
+            Content-Length:
+              schema: { type: integer, minimum: 0 }
+            Accept-Ranges:
+              schema: { type: string, const: bytes }
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/ListPartsResult"
+        "206":
+          description: A single requested byte range.
+          headers:
+            Content-Range:
+              schema: { type: string }
+            Content-Length:
+              schema: { type: integer, minimum: 0 }
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "304":
+          description: A conditional read determined that the object was not modified.
+        "412":
+          description: A read precondition failed.
+        "416":
+          description: The requested byte range is not satisfiable.
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+    head:
+      tags: [Objects]
+      operationId: headObject
+      summary: Read object metadata
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IfNoneMatch"
+        - $ref: "#/components/parameters/IfModifiedSince"
+        - $ref: "#/components/parameters/IfUnmodifiedSince"
+      responses:
+        "200":
+          description: Object metadata. Stored `x-amz-meta-*` and representation headers are included.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Last-Modified:
+              schema: { type: string }
+            Content-Length:
+              schema: { type: integer, minimum: 0 }
+        "304":
+          description: The object was not modified.
+        "412":
+          description: A precondition failed.
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+    delete:
+      tags: [Objects, Multipart uploads]
+      operationId: deleteObjectOrAbortMultipartUpload
+      summary: Delete an object or abort a multipart upload
+      description: With `uploadId`, aborts that multipart upload; otherwise deletes the object.
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+      responses:
+        "204":
+          description: Object deleted or multipart upload aborted.
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+    post:
+      tags: [Multipart uploads]
+      operationId: manageMultipartUpload
+      summary: Create or complete a multipart upload
+      description: |
+        The `uploads` query flag creates an upload. An `uploadId` query parameter completes
+        an upload using the ordered parts in the XML request body.
+      parameters:
+        - $ref: "#/components/parameters/UploadsFlag"
+        - $ref: "#/components/parameters/UploadId"
+        - $ref: "#/components/parameters/ContentType"
+        - $ref: "#/components/parameters/CacheControl"
+        - $ref: "#/components/parameters/ContentDisposition"
+        - $ref: "#/components/parameters/ContentEncoding"
+        - $ref: "#/components/parameters/ContentLanguage"
+        - $ref: "#/components/parameters/Expires"
+      requestBody:
+        description: Required only when completing an upload.
+        content:
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/CompleteMultipartUploadRequest"
+      responses:
+        "200":
+          description: Multipart upload created or completed.
+          content:
+            application/xml:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/InitiateMultipartUploadResult"
+                  - $ref: "#/components/schemas/CompleteMultipartUploadResult"
+        "4XX":
+          $ref: "#/components/responses/S3Error"
+        default:
+          $ref: "#/components/responses/S3Error"
+
+components:
+  securitySchemes:
+    AwsSigV4Header:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: |
+        AWS Signature Version 4 authorization (`AWS4-HMAC-SHA256`). Signed requests also
+        send `x-amz-date` and `x-amz-content-sha256`. The configured access key is
+        service-wide and is not an admin project API key.
+    AwsSigV4PresignedQuery:
+      type: apiKey
+      in: query
+      name: X-Amz-Signature
+      description: |
+        AWS Signature Version 4 presigned URL. The URL must also contain the standard
+        `X-Amz-Algorithm`, `X-Amz-Credential`, `X-Amz-Date`, `X-Amz-Expires`, and
+        `X-Amz-SignedHeaders` parameters.
+
+  parameters:
+    Bucket:
+      name: bucket
+      in: path
+      required: true
+      description: DNS-compatible bucket name.
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 63
+        pattern: "^[a-z0-9][a-z0-9.-]*[a-z0-9]$"
+    Key:
+      name: key
+      in: path
+      required: true
+      description: Greedy object key remainder; may include slashes and UTF-8 characters.
+      allowReserved: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+    ListType:
+      name: list-type
+      in: query
+      description: Accepted for S3 `ListObjectsV2` compatibility.
+      schema: { type: integer, const: 2 }
+    Prefix:
+      name: prefix
+      in: query
+      schema: { type: string }
+    Delimiter:
+      name: delimiter
+      in: query
+      schema: { type: string }
+    MaxKeys:
+      name: max-keys
+      in: query
+      schema: { type: integer, minimum: 0, maximum: 1000, default: 1000 }
+    ContinuationToken:
+      name: continuation-token
+      in: query
+      schema: { type: string }
+    StartAfter:
+      name: start-after
+      in: query
+      schema: { type: string }
+    EncodingType:
+      name: encoding-type
+      in: query
+      schema: { type: string, enum: [url] }
+    UploadsFlag:
+      name: uploads
+      in: query
+      allowEmptyValue: true
+      description: Presence selects a multipart-upload operation.
+      schema: { type: string }
+    DeleteFlag:
+      name: delete
+      in: query
+      required: true
+      allowEmptyValue: true
+      description: Presence selects multi-object delete.
+      schema: { type: string }
+    UploadId:
+      name: uploadId
+      in: query
+      schema: { type: string }
+    PartNumber:
+      name: partNumber
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 10000 }
+    CopySource:
+      name: x-amz-copy-source
+      in: header
+      description: URL-encoded source in `/bucket/key` form.
+      schema: { type: string }
+    MetadataDirective:
+      name: x-amz-metadata-directive
+      in: header
+      description: Use `REPLACE` on copy to replace source representation and user metadata.
+      schema: { type: string, enum: [COPY, REPLACE], default: COPY }
+    ContentType:
+      name: Content-Type
+      in: header
+      description: Stored object media type.
+      schema: { type: string, default: application/octet-stream }
+    CacheControl:
+      name: Cache-Control
+      in: header
+      description: Stored representation metadata.
+      schema: { type: string }
+    ContentDisposition:
+      name: Content-Disposition
+      in: header
+      description: Stored representation metadata.
+      schema: { type: string }
+    ContentEncoding:
+      name: Content-Encoding
+      in: header
+      description: Stored representation metadata.
+      schema: { type: string }
+    ContentLanguage:
+      name: Content-Language
+      in: header
+      description: Stored representation metadata.
+      schema: { type: string }
+    Expires:
+      name: Expires
+      in: header
+      description: Stored representation metadata.
+      schema: { type: string }
+    Range:
+      name: Range
+      in: header
+      description: A single RFC 9110 byte range, for example `bytes=0-1023`.
+      schema: { type: string, pattern: "^bytes=\\d*-\\d*$" }
+    IfMatch:
+      name: If-Match
+      in: header
+      schema: { type: string }
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      schema: { type: string }
+    IfModifiedSince:
+      name: If-Modified-Since
+      in: header
+      schema: { type: string, format: http-date }
+    IfUnmodifiedSince:
+      name: If-Unmodified-Since
+      in: header
+      schema: { type: string, format: http-date }
+    ResponseContentType:
+      name: response-content-type
+      in: query
+      description: Overrides `Content-Type` on the object response.
+      schema: { type: string }
+    ResponseContentDisposition:
+      name: response-content-disposition
+      in: query
+      description: Overrides `Content-Disposition` when the value is ASCII-safe.
+      schema: { type: string }
+    ResponseCacheControl:
+      name: response-cache-control
+      in: query
+      description: Overrides `Cache-Control` when the value is ASCII-safe.
+      schema: { type: string }
+    ResponseContentEncoding:
+      name: response-content-encoding
+      in: query
+      description: Overrides `Content-Encoding` when the value is ASCII-safe.
+      schema: { type: string }
+    ResponseContentLanguage:
+      name: response-content-language
+      in: query
+      description: Overrides `Content-Language` when the value is ASCII-safe.
+      schema: { type: string }
+    ResponseExpires:
+      name: response-expires
+      in: query
+      description: Overrides `Expires` when the value is ASCII-safe.
+      schema: { type: string }
+
+  headers:
+    ETag:
+      description: Quoted entity tag.
+      schema: { type: string }
+    RequestId:
+      description: Request identifier generated by the storage service.
+      schema: { type: string }
+    BucketRegion:
+      description: Configured S3 region.
+      schema: { type: string }
+
+  responses:
+    S3Error:
+      description: S3-compatible XML error. Common statuses include 400, 403, 404, 405, 409, 413, 416, 500, and 503.
+      headers:
+        x-amz-request-id:
+          $ref: "#/components/headers/RequestId"
+        x-amz-bucket-region:
+          $ref: "#/components/headers/BucketRegion"
+      content:
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/S3Error"
+
+  schemas:
+    S3Error:
+      type: object
+      xml: { name: Error }
+      required: [Code, Message, RequestId]
+      properties:
+        Code: { type: string }
+        Message: { type: string }
+        Resource: { type: string }
+        RequestId: { type: string }
+    Owner:
+      type: object
+      required: [ID, DisplayName]
+      properties:
+        ID: { type: string }
+        DisplayName: { type: string, const: deniz-cloud }
+    Bucket:
+      type: object
+      required: [Name, CreationDate]
+      properties:
+        Name: { type: string }
+        CreationDate: { type: string, format: date-time }
+    ListAllMyBucketsResult:
+      type: object
+      xml: { name: ListAllMyBucketsResult, namespace: "http://s3.amazonaws.com/doc/2006-03-01/" }
+      required: [Owner, Buckets]
+      properties:
+        Owner:
+          $ref: "#/components/schemas/Owner"
+        Buckets:
+          type: object
+          properties:
+            Bucket:
+              type: array
+              items: { $ref: "#/components/schemas/Bucket" }
+    ObjectSummary:
+      type: object
+      required: [Key, LastModified, ETag, Size, StorageClass]
+      properties:
+        Key: { type: string }
+        LastModified: { type: string, format: date-time }
+        ETag: { type: string }
+        Size: { type: integer, minimum: 0 }
+        StorageClass: { type: string, const: STANDARD }
+    ListBucketResult:
+      type: object
+      xml: { name: ListBucketResult, namespace: "http://s3.amazonaws.com/doc/2006-03-01/" }
+      required: [Name, Prefix, KeyCount, MaxKeys, IsTruncated]
+      properties:
+        Name: { type: string }
+        Prefix: { type: string }
+        Delimiter: { type: string }
+        EncodingType: { type: string, enum: [url] }
+        KeyCount: { type: integer, minimum: 0 }
+        MaxKeys: { type: integer, minimum: 0, maximum: 1000 }
+        IsTruncated: { type: boolean }
+        ContinuationToken: { type: string }
+        NextContinuationToken: { type: string }
+        StartAfter: { type: string }
+        Contents:
+          type: array
+          items: { $ref: "#/components/schemas/ObjectSummary" }
+        CommonPrefixes:
+          type: array
+          items:
+            type: object
+            properties:
+              Prefix: { type: string }
+    DeleteObjectsRequest:
+      type: object
+      xml: { name: Delete }
+      required: [Object]
+      properties:
+        Object:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [Key]
+            properties:
+              Key: { type: string }
+        Quiet: { type: boolean, default: false }
+    DeleteResult:
+      type: object
+      xml: { name: DeleteResult, namespace: "http://s3.amazonaws.com/doc/2006-03-01/" }
+      properties:
+        Deleted:
+          type: array
+          items:
+            type: object
+            properties:
+              Key: { type: string }
+    CopyObjectResult:
+      type: object
+      xml: { name: CopyObjectResult }
+      required: [LastModified, ETag]
+      properties:
+        LastModified: { type: string, format: date-time }
+        ETag: { type: string }
+    InitiateMultipartUploadResult:
+      type: object
+      xml: { name: InitiateMultipartUploadResult, namespace: "http://s3.amazonaws.com/doc/2006-03-01/" }
+      required: [Bucket, Key, UploadId]
+      properties:
+        Bucket: { type: string }
+        Key: { type: string }
+        UploadId: { type: string }
+    CompletedPart:
+      type: object
+      required: [PartNumber, ETag]
+      properties:
+        PartNumber: { type: integer, minimum: 1, maximum: 10000 }
+        ETag: { type: string }
+    CompleteMultipartUploadRequest:
+      type: object
+      xml: { name: CompleteMultipartUpload }
+      required: [Part]
+      properties:
+        Part:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { $ref: "#/components/schemas/CompletedPart" }
+    CompleteMultipartUploadResult:
+      type: object
+      xml: { name: CompleteMultipartUploadResult, namespace: "http://s3.amazonaws.com/doc/2006-03-01/" }
+      required: [Location, Bucket, Key, ETag]
+      properties:
+        Location: { type: string }
+        Bucket: { type: string }
+        Key: { type: string }
+        ETag: { type: string }
+    Part:
+      type: object
+      required: [PartNumber, LastModified, ETag, Size]
+      properties:
+        PartNumber: { type: integer, minimum: 1 }
+        LastModified: { type: string, format: date-time }
+        ETag: { type: string }
+        Size: { type: integer, minimum: 0 }
+    ListPartsResult:
+      type: object
+      xml: { name: ListPartsResult, namespace: "http://s3.amazonaws.com/doc/2006-03-01/" }
+      required: [Bucket, Key, UploadId, MaxParts, IsTruncated]
+      properties:
+        Bucket: { type: string }
+        Key: { type: string }
+        UploadId: { type: string }
+        MaxParts: { type: integer, const: 1000 }
+        IsTruncated: { type: boolean, const: false }
+        Part:
+          type: array
+          items: { $ref: "#/components/schemas/Part" }
+    MultipartUpload:
+      type: object
+      required: [Key, UploadId, Initiated]
+      properties:
+        Key: { type: string }
+        UploadId: { type: string }
+        Initiated: { type: string, format: date-time }
+        StorageClass: { type: string, const: STANDARD }
+    ListMultipartUploadsResult:
+      type: object
+      xml: { name: ListMultipartUploadsResult, namespace: "http://s3.amazonaws.com/doc/2006-03-01/" }
+      required: [Bucket, MaxUploads, IsTruncated]
+      properties:
+        Bucket: { type: string }
+        MaxUploads: { type: integer, const: 1000 }
+        IsTruncated: { type: boolean, const: false }
+        Upload:
+          type: array
+          items: { $ref: "#/components/schemas/MultipartUpload" }
