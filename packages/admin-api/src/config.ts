@@ -1,5 +1,13 @@
 import { optionalEnv, requiredEnv } from "@deniz-cloud/shared/env";
 
+function boundedInteger(name: string, fallback: string, min: number, max: number): number {
+  const value = Number.parseInt(optionalEnv(name, fallback), 10);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}`);
+  }
+  return value;
+}
+
 export const config = {
   port: parseInt(optionalEnv("PORT", "3002"), 10),
   databaseUrl: requiredEnv("DATABASE_URL"),
@@ -9,6 +17,8 @@ export const config = {
   meiliMasterKey: requiredEnv("MEILI_MASTER_KEY"),
   mongodbUri: requiredEnv("MONGODB_URI"),
   mongodbAdminUri: requiredEnv("MONGODB_ADMIN_URI"),
+  mongotHealthUrl: optionalEnv("MONGOT_HEALTH_URL", "http://mongot:8080"),
+  mongotMaxIndexesPerProject: boundedInteger("MONGOT_MAX_INDEXES_PER_PROJECT", "5", 1, 50),
   redisAdminUrl: requiredEnv("REDIS_ADMIN_URL"),
   postgresInternalHost: optionalEnv("POSTGRES_INTERNAL_HOST", "postgres:5432"),
   postgresExternalHost: optionalEnv("POSTGRES_EXTERNAL_HOST", "postgres.denizlg24.com:5433"),

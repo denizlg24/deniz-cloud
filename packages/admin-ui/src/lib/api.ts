@@ -797,6 +797,70 @@ export async function deprovisionDatabase(projectId: string, dbId: string): Prom
   await request(`/projects/${projectId}/databases/${dbId}`, { method: "DELETE" });
 }
 
+export type VectorSimilarity = "cosine" | "euclidean" | "dotProduct";
+export type VectorQuantization = "none" | "scalar" | "binary";
+
+export interface ProjectVectorIndex {
+  collection: string;
+  name: string;
+  status: string;
+  queryable: boolean;
+  path: string;
+  numDimensions: number;
+  similarity: VectorSimilarity;
+  quantization: VectorQuantization;
+  filterPaths: string[];
+}
+
+export interface ProjectVectorSearchOverview {
+  database: string;
+  collections: string[];
+  indexes: ProjectVectorIndex[];
+  mongot: { status: "ready" | "unavailable"; message?: string };
+  maxIndexes: number;
+}
+
+export interface CreateProjectVectorIndexInput {
+  collection: string;
+  name: string;
+  path: string;
+  numDimensions: number;
+  similarity: VectorSimilarity;
+  quantization: VectorQuantization;
+  filterPaths: string[];
+}
+
+export async function getProjectVectorIndexes(
+  projectId: string,
+): Promise<ProjectVectorSearchOverview> {
+  const res = await request<{ data: ProjectVectorSearchOverview }>(
+    `/projects/${projectId}/vector-indexes`,
+  );
+  return res.data;
+}
+
+export async function createProjectVectorIndex(
+  projectId: string,
+  input: CreateProjectVectorIndexInput,
+): Promise<void> {
+  await request(`/projects/${projectId}/vector-indexes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteProjectVectorIndex(
+  projectId: string,
+  collection: string,
+  indexName: string,
+): Promise<void> {
+  await request(
+    `/projects/${projectId}/vector-indexes/${encodeURIComponent(collection)}/${encodeURIComponent(indexName)}`,
+    { method: "DELETE" },
+  );
+}
+
 export type TaskType =
   | "backup_postgres"
   | "backup_mongodb"

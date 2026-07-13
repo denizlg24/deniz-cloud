@@ -69,6 +69,8 @@ tags:
     description: Meilisearch collection/index management within a project (superuser only)
   - name: Search Tokens
     description: Meilisearch tenant token generation for a project (superuser only)
+  - name: Vector Search
+    description: Project-scoped MongoDB vector index management through mongot (superuser only)
   - name: Postgres Database Management
     description: PostgreSQL database browsing, table management, and query execution (superuser only)
   - name: MongoDB Database Management
@@ -81,6 +83,7 @@ paths:
       summary: Health check
       description: Returns service health status. No authentication required.
       tags: [Health]
+      security: []
       responses:
         "200":
           description: Service is healthy
@@ -114,6 +117,7 @@ paths:
         4. If TOTP code or recovery code is provided, verify it
         5. Create a session (24h expiry) and return the JWT token
       tags: [Auth]
+      security: []
       requestBody:
         required: true
         content:
@@ -1457,6 +1461,153 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  # --- Project MongoDB Vector Search ---
+
+  /api/projects/{projectId}/vector-indexes:
+    get:
+      operationId: listProjectVectorIndexes
+      summary: List a project's MongoDB vector indexes
+      tags: [Vector Search]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Collections, vector indexes, quota, and mongot readiness
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ProjectVectorSearchOverview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Project MongoDB is not provisioned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    post:
+      operationId: createProjectVectorIndex
+      summary: Create a project-scoped MongoDB vector index
+      description: Starts an asynchronous vector index build on an existing collection.
+      tags: [Vector Search]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateVectorIndexRequest" }
+            example:
+              collection: documents
+              name: semantic_index
+              path: embedding
+              numDimensions: 1536
+              similarity: cosine
+              quantization: scalar
+              filterPaths: [tenantId, category]
+      responses:
+        "202":
+          description: Vector index build accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      collection: { type: string }
+                      name: { type: string }
+                      status: { type: string, const: BUILDING }
+        "400":
+          description: Invalid vector index definition
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Project MongoDB or collection not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Index exists or project quota reached
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: mongot is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/projects/{projectId}/vector-indexes/{collection}/{indexName}:
+    delete:
+      operationId: deleteProjectVectorIndex
+      summary: Delete a project-scoped MongoDB vector index
+      tags: [Vector Search]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: collection
+          in: path
+          required: true
+          schema: { type: string }
+        - name: indexName
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Vector index deleted; source documents are unchanged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      collection: { type: string }
+                      name: { type: string }
+                      dropped: { type: boolean, const: true }
+        "400":
+          description: Invalid collection or index name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Project MongoDB is not provisioned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   # --- MongoDB Database Management ---
 
   /api/db/mongodb/databases:
@@ -2065,6 +2216,80 @@ components:
 
   schemas:
     # --- Request Schemas ---
+
+    CreateVectorIndexRequest:
+      type: object
+      additionalProperties: false
+      required: [collection, name, path, numDimensions, similarity]
+      properties:
+        collection:
+          type: string
+          pattern: ^[A-Za-z_][A-Za-z0-9_.-]{0,119}$
+        name:
+          type: string
+          pattern: ^[A-Za-z_][A-Za-z0-9_.-]{0,119}$
+        path:
+          type: string
+          description: Dotted path to the embedding array
+        numDimensions:
+          type: integer
+          minimum: 1
+          maximum: 4096
+        similarity:
+          type: string
+          enum: [cosine, euclidean, dotProduct]
+        quantization:
+          type: string
+          enum: [none, scalar, binary]
+          default: none
+        filterPaths:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items: { type: string }
+
+    ProjectVectorIndex:
+      type: object
+      required: [collection, name, status, queryable, path, numDimensions, similarity, quantization, filterPaths]
+      properties:
+        collection: { type: string }
+        name: { type: string }
+        status: { type: string }
+        queryable: { type: boolean }
+        path: { type: string }
+        numDimensions: { type: integer }
+        similarity:
+          type: string
+          enum: [cosine, euclidean, dotProduct]
+        quantization:
+          type: string
+          enum: [none, scalar, binary]
+        filterPaths:
+          type: array
+          items: { type: string }
+
+    ProjectVectorSearchOverview:
+      type: object
+      required: [database, collections, indexes, mongot, maxIndexes]
+      properties:
+        database: { type: string }
+        collections:
+          type: array
+          items: { type: string }
+        indexes:
+          type: array
+          items: { $ref: "#/components/schemas/ProjectVectorIndex" }
+        mongot:
+          type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [ready, unavailable]
+            message: { type: string }
+        maxIndexes:
+          type: integer
+          minimum: 1
 
     LoginRequest:
       type: object

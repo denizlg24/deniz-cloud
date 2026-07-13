@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { ProjectVectorSearch } from "@/components/project-vector-search";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -844,6 +845,13 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
           </div>
         )}
       </div>
+
+      {!databasesLoading && databases.find((database) => database.type === "mongodb") && (
+        <ProjectVectorSearch
+          projectId={project.id}
+          databaseName={databases.find((database) => database.type === "mongodb")?.dbName ?? ""}
+        />
+      )}
 
       <AlertDialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)}>
         <AlertDialogContent>

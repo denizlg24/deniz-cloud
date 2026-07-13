@@ -26,7 +26,7 @@ services:
       retries: 5
 
   mongodb:
-    image: mongo:7
+    image: ${MONGO_IMAGE:-mongo:8.2.11}
     ports:
       - "${MONGO_PORT:-27018}:27017"
     environment:
@@ -34,59 +34,60 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
       MONGO_SYNC_USER: ${MONGO_SYNC_USER:-sync_reader}
       MONGO_SYNC_PASSWORD: ${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
+      MONGO_SEARCH_ENABLED: ${MONGO_SEARCH_ENABLED:-true}
+      MONGO_WIREDTIGER_CACHE_GB: ${MONGO_WIREDTIGER_CACHE_GB:-0.25}
     volumes:
       - ./data/mongo:/data/db
-      - ./config/mongo/replica-keyfile:/data/replica-keyfile:ro
-    entrypoint: ["/bin/bash", "-c", "cp /data/replica-keyfile /tmp/replica-keyfile && chmod 400 /tmp/replica-keyfile && chown 999:999 /tmp/replica-keyfile && exec docker-entrypoint.sh mongod --wiredTigerCacheSizeGB 0.25 --replSet rs0 --keyFile /tmp/replica-keyfile"]
-    mem_limit: 400m
+      - ./config/mongo/replica-keyfile:/etc/mongo/replica-keyfile:ro
+      - ./scripts/infra/mongodb-entrypoint.sh:/usr/local/bin/deniz-mongodb-entrypoint.sh:ro
+    entrypoint: ["/bin/bash", "/usr/local/bin/deniz-mongodb-entrypoint.sh"]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "try { rs.status().ok } catch(e) { db.adminCommand('ping').ok }", "--quiet"]
+      test: ["CMD-SHELL", "test \"$$(cat /proc/1/comm)\" = mongod && mongosh --quiet --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"quit(db.adminCommand({ ping: 1 }).ok === 1 ? 0 : 1)\""]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 12
+      start_period: 20s
 
   mongo-init:
-    image: mongo:7
+    image: ${MONGO_IMAGE:-mongo:8.2.11}
     depends_on:
       mongodb:
         condition: service_healthy
     restart: "no"
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      - |
-        echo "[mongo-init] Checking replica set..."
-        if mongosh "mongodb://$${MONGO_USER}:$${MONGO_PASS}@mongodb:27017/?authSource=admin" --eval "rs.status().ok" --quiet 2>/dev/null; then
-          echo "[mongo-init] Replica set already initialized"
-        else
-          echo "[mongo-init] Initiating replica set..."
-          mongosh "mongodb://$${MONGO_USER}:$${MONGO_PASS}@mongodb:27017/?authSource=admin&directConnection=true" --eval '
-            rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "mongodb:27017" }] });
-          '
-          echo "[mongo-init] Waiting for primary..."
-          sleep 5
-        fi
-
-        echo "[mongo-init] Ensuring sync user exists..."
-        mongosh "mongodb://$${MONGO_USER}:$${MONGO_PASS}@mongodb:27017/?authSource=admin&directConnection=true" --eval "
-          const u = db.getSiblingDB('admin').getUser('$${SYNC_USER}');
-          if (!u) {
-            db.getSiblingDB('admin').createUser({
-              user: '$${SYNC_USER}',
-              pwd: '$${SYNC_PASS}',
-              roles: [{ role: 'readAnyDatabase', db: 'admin' }]
-            });
-            print('[mongo-init] Sync user created');
-          } else {
-            print('[mongo-init] Sync user already exists');
-          }
-        "
-        echo "[mongo-init] Done"
+    entrypoint: ["/bin/bash", "/usr/local/bin/mongo-rs-init.sh"]
     environment:
       MONGO_USER: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_PASS: ${MONGO_INITDB_ROOT_PASSWORD}
       SYNC_USER: ${MONGO_SYNC_USER:-sync_reader}
       SYNC_PASS: ${MONGO_SYNC_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
+      SEARCH_USER: mongot_search
+      SEARCH_PASS: ${MONGOT_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD}}
+    volumes:
+      - ./scripts/infra/mongo-rs-init.sh:/usr/local/bin/mongo-rs-init.sh:ro
+      - mongot-secrets:/run/mongot-secrets
+
+  mongot:
+    image: ${MONGOT_IMAGE:-mongodb/mongodb-community-search:1.70.1}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    environment:
+      MONGOT_JVM_FLAGS: ${MONGOT_JVM_FLAGS:-}
+    volumes:
+      - ./config/mongo/mongot.yml:/mongot-community/config.default.yml:ro
+      - mongot-secrets:/etc/mongot/secrets:ro
+      - ${MONGOT_DATA_DIR:-./data/mongot}:/data/mongot
+    entrypoint: ["/bin/bash", "-c", "if [[ -n \"$${MONGOT_JVM_FLAGS}\" ]]; then exec /mongot-community/mongot --config /mongot-community/config.default.yml --jvm-flags \"$${MONGOT_JVM_FLAGS}\"; else exec /mongot-community/mongot --config /mongot-community/config.default.yml; fi"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://mongot:8080/ready >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   meilisearch:
     image: getmeili/meilisearch:v1.38
@@ -162,5 +163,8 @@ services:
       SHELL_ARGS: "-l"
     mem_limit: 64m
     restart: unless-stopped
+
+volumes:
+  mongot-secrets:
 
 

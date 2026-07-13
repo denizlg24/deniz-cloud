@@ -181,7 +181,7 @@ Files are stored on either SSD or HDD, but presented as a single unified filesys
 
 ### 4.2 MongoDB — `mongodb.denizlg24.com` (Port 27018)
 
-- Standard MongoDB 7.x container (ARM64 build)
+- MongoDB Community 8.2 container (ARM64 build), upgraded through the required 8.0 intermediate release
 - Data directory mounted on SSD (`/mnt/ssd/mongo`)
 - Auth enabled, non-default port (27018)
 - TLS configured with Let's Encrypt or self-signed certificates
@@ -277,7 +277,7 @@ Superuser-only interface. Accessible only after admin authentication (TOTP + rec
 
 ### 4.7 Meilisearch (Search Sidecar)
 
-MongoDB Atlas Search (`$search` aggregation stage) is not available on self-hosted MongoDB — it's an Atlas-exclusive feature powered by Lucene. To support apps that were built against Atlas Search, we run **Meilisearch** as a lightweight search sidecar.
+We run **Meilisearch** as a lightweight sidecar for full-text, fuzzy, and typo-tolerant search. MongoDB Community 8.2 also runs self-managed MongoDB Search (`mongot`) for native `$vectorSearch`; the two systems are independent.
 
 - Meilisearch container (~80–120MB RAM), ARM64 compatible
 - Data directory mounted on SSD (`/mnt/ssd/meilisearch`)
@@ -393,11 +393,11 @@ See [`SEARCH_MIGRATION.md`](./SEARCH_MIGRATION.md) for a guide on migrating `$se
 | Admin Panel | Hono serving a React SPA |
 | Frontend framework | React with Vite (static SPA build, no SSR — saves RAM) |
 | Database (metadata + auth) | PostgreSQL 16 |
-| Database (external projects) | PostgreSQL 16 + MongoDB 7 |
+| Database (external projects) | PostgreSQL 16 + MongoDB 8.2 |
 | ORM | Drizzle (lightweight, TypeScript-native) |
 | File previews | Sharp (images), pdf.js (PDFs), native video element (streaming) |
 | Auth | Custom (argon2, otpauth for TOTP) |
-| Search (Atlas Search replacement) | Meilisearch (sidecar, synced via change streams) |
+| Search | Meilisearch (text, synced via change streams) + mongot (MongoDB vector search) |
 | Containerization | Docker + Docker Compose |
 | Tunnel | Cloudflared |
 | DB admin tools | Adminer (Postgres), mongo-express with `--minimal` or Mongoku (Mongo) |
@@ -499,7 +499,8 @@ deniz-cloud/
 | Service | Image/Build | Port | Memory Limit |
 |---|---|---|---|
 | `postgres` | postgres:16-alpine | 5433 | 200MB |
-| `mongodb` | mongo:7 | 27018 | 400MB |
+| `mongodb` | mongo:8.2.11 | 27018 | No Docker memory cap |
+| `mongot` | mongodb-community-search:1.70.1 | Internal only | No Docker memory cap |
 | `redis` | redis:7-alpine | 6380 | 160MB |
 | `storage` | Custom (Bun + Hono) | 3001 | 300MB |
 | `admin` | Custom (Bun + Hono) | 3002 | 250MB |

@@ -2,6 +2,8 @@
 
 This guide shows how to migrate apps that use Atlas Search (`$search` aggregation stage) to use a self-hosted Meilisearch instance as a search sidecar alongside MongoDB.
 
+> Meilisearch remains supported for full-text, fuzzy, and typo-tolerant search. MongoDB 8.2 self-managed `$vectorSearch` is an additional semantic-search option; see [MongoDB 8.2 and Vector Search](./MONGODB_VECTOR_SEARCH.md).
+
 ---
 
 ## Architecture Overview

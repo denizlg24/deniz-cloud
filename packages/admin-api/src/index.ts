@@ -15,6 +15,7 @@ import { authRoutes } from "./routes/auth";
 import { mongoDbRoutes } from "./routes/db-mongodb";
 import { postgresDbRoutes } from "./routes/db-postgres";
 import { projectDatabaseRoutes, syncRedisProjectAclUsers } from "./routes/project-databases";
+import { projectVectorIndexRoutes } from "./routes/project-vector-indexes";
 import { projectRoutes } from "./routes/projects";
 import { s3CredentialsRoutes } from "./routes/s3-credentials";
 import { statsRoutes } from "./routes/stats";
@@ -82,6 +83,15 @@ app.route("/api/stats", statsRoutes({ db }));
 app.use("/api/projects/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/projects/*", requireRole("superuser"));
 app.route("/api/projects", projectRoutes({ db, meiliClient, syncWorker, pgClientFactory }));
+app.route(
+  "/api/projects",
+  projectVectorIndexRoutes({
+    db,
+    mongoAdminClient,
+    mongotHealthUrl: config.mongotHealthUrl,
+    maxIndexesPerProject: config.mongotMaxIndexesPerProject,
+  }),
+);
 
 app.use("/api/settings/s3-credentials", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/settings/s3-credentials", requireRole("superuser"));
