@@ -2,6 +2,7 @@ import type { Database } from "@deniz-cloud/shared/db";
 import { files } from "@deniz-cloud/shared/db";
 import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { contentDisposition } from "../utils/content-disposition";
 import { verifyShareToken } from "../utils/share";
 
 interface ShareRouteDeps {
@@ -75,7 +76,7 @@ export function shareRoutes({ db, jwtSecret }: ShareRouteDeps) {
       headers: {
         "Content-Type": contentType,
         "Content-Length": String(file.sizeBytes),
-        "Content-Disposition": `${disposition}; filename="${file.filename}"`,
+        "Content-Disposition": contentDisposition(disposition, file.filename),
         "Accept-Ranges": "bytes",
       },
     });

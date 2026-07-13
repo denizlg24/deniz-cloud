@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Hono } from "hono";
+import { contentDisposition } from "../../utils/content-disposition";
 
 interface FileRecord {
   id: string;
@@ -71,7 +72,7 @@ function createShareApp(overrides: {
       headers: {
         "Content-Type": contentType,
         "Content-Length": String(file.sizeBytes),
-        "Content-Disposition": `${disposition}; filename="${file.filename}"`,
+        "Content-Disposition": contentDisposition(disposition, file.filename),
         "Accept-Ranges": "bytes",
       },
     });
@@ -153,7 +154,9 @@ describe("GET /share/:token — full file response", () => {
     });
     const res = await app.request("/valid-token");
 
-    expect(res.headers.get("Content-Disposition")).toBe('inline; filename="photo.jpg"');
+    expect(res.headers.get("Content-Disposition")).toBe(
+      "inline; filename=\"photo.jpg\"; filename*=UTF-8''photo.jpg",
+    );
   });
 
   it("uses attachment disposition when ?download is present", async () => {
@@ -163,7 +166,9 @@ describe("GET /share/:token — full file response", () => {
     });
     const res = await app.request("/valid-token?download");
 
-    expect(res.headers.get("Content-Disposition")).toBe('attachment; filename="photo.jpg"');
+    expect(res.headers.get("Content-Disposition")).toBe(
+      "attachment; filename=\"photo.jpg\"; filename*=UTF-8''photo.jpg",
+    );
   });
 
   it("uses attachment when ?download= (empty value)", async () => {
@@ -174,6 +179,20 @@ describe("GET /share/:token — full file response", () => {
     const res = await app.request("/valid-token?download=");
 
     expect(res.headers.get("Content-Disposition")).toContain("attachment");
+  });
+
+  it("serves a UTF-8 filename without constructing an invalid response header", async () => {
+    const unicodeFile = { ...testFile, filename: "le_ts_care_portugal_â_desafios.png" };
+    const app = createShareApp({
+      verifyToken: () => validPayload,
+      findFile: () => unicodeFile,
+    });
+    const res = await app.request("/valid-token");
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Disposition")).toContain(
+      "filename*=UTF-8''le_ts_care_portugal_%C3%A2_desafios.png",
+    );
   });
 
   it("includes Accept-Ranges header", async () => {

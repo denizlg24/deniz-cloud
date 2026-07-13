@@ -5,6 +5,7 @@ Self-hosted home server running on a Raspberry Pi 5 (4GB RAM) with tiered storag
 ## What it does
 
 - **Cloud storage** — Google Drive-like web UI for my family, with file previews, folder organization, and shareable links. Files are transparently tiered between SSD (hot) and HDD (cold) based on access patterns and size.
+- **S3-compatible storage** — SigV4-authenticated bucket and object access at `/v2`, compatible with SDKs that support custom path-style endpoints. See [S3 API setup](./docs/S3_API.md).
 - **MongoDB, PostgreSQL & Redis** — Databases/caching for personal projects, exposed as raw TCP connections over port forwarding with dynamic DNS.
 - **Admin panel** — Dashboard for managing users, monitoring storage health, and accessing lightweight DB tools.
 

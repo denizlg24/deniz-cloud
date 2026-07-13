@@ -12,6 +12,10 @@ describe("admin-api config shape", () => {
       "meiliUrl",
       "meiliMasterKey",
       "redisAdminUrl",
+      "s3Endpoint",
+      "s3AccessKeyId",
+      "s3SecretAccessKey",
+      "s3Region",
     ];
 
     // Document the expected shape

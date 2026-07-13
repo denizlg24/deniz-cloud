@@ -32,7 +32,7 @@ COPY packages/admin-api/package.json ./packages/admin-api/
 COPY packages/admin-ui/package.json ./packages/admin-ui/
 COPY packages/terminal-server/package.json ./packages/terminal-server/
 
-RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --ignore-scripts
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install --production --frozen-lockfile --ignore-scripts
 
 COPY packages/shared/ ./packages/shared/
 COPY packages/storage-api/ ./packages/storage-api/

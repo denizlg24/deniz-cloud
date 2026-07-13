@@ -2,6 +2,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Check,
+  Cloud,
   Copy,
   Database,
   Eye,
@@ -74,6 +75,7 @@ import {
   getCollections,
   getProjectDatabases,
   getProjects,
+  getS3Credentials,
   listProjectPgColumns,
   listProjectPgDatabases,
   listProjectPgSchemas,
@@ -85,6 +87,7 @@ import {
   provisionDatabase,
   resyncCollection,
   revokeApiKey,
+  type S3Credentials,
   type SearchRules,
   updateCollectionApi,
 } from "@/lib/api";
@@ -337,9 +340,11 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [collections, setCollections] = useState<ProjectCollection[]>([]);
   const [databases, setDatabases] = useState<ProjectDatabase[]>([]);
+  const [s3Credentials, setS3Credentials] = useState<S3Credentials | null>(null);
   const [loading, setLoading] = useState(true);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
   const [databasesLoading, setDatabasesLoading] = useState(true);
+  const [s3CredentialsLoading, setS3CredentialsLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [createCollOpen, setCreateCollOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null);
@@ -381,11 +386,24 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
     }
   }, [project.id]);
 
+  const refreshS3Credentials = useCallback(async () => {
+    setS3CredentialsLoading(true);
+    try {
+      setS3Credentials(await getS3Credentials());
+    } catch {
+      setS3Credentials(null);
+      toast.error("Failed to load S3 credentials");
+    } finally {
+      setS3CredentialsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     refreshKeys();
     refreshCollections();
     refreshDatabases();
-  }, [refreshKeys, refreshCollections, refreshDatabases]);
+    refreshS3Credentials();
+  }, [refreshKeys, refreshCollections, refreshDatabases, refreshS3Credentials]);
 
   async function handleRevoke() {
     if (!revokeTarget) return;
@@ -460,6 +478,33 @@ function ProjectDetailView({ project, onBack }: { project: Project; onBack: () =
             {project.description && <span className="ml-2">{project.description}</span>}
           </p>
         </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-medium flex items-center gap-2">
+            <Cloud className="h-4 w-4" />
+            S3 Storage
+          </h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={refreshS3Credentials}
+            aria-label="Refresh S3 credentials"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {s3CredentialsLoading ? (
+          <Skeleton className="h-56" />
+        ) : s3Credentials ? (
+          <S3CredentialsDisplay credentials={s3Credentials} />
+        ) : (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+            S3 credentials could not be loaded. Check the admin API configuration.
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -1708,6 +1753,133 @@ function CreateCollectionDialog({
         </DialogFooter>
       </form>
     </DialogContent>
+  );
+}
+
+function S3CredentialsDisplay({ credentials }: { credentials: S3Credentials }) {
+  const [secretVisible, setSecretVisible] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  async function copy(value: string, field: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch {
+      toast.error("Could not copy to the clipboard");
+    }
+  }
+
+  if (!credentials.enabled) {
+    return (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium">S3-compatible storage is not configured</p>
+            <p className="text-xs text-muted-foreground">
+              Set both <code>S3_ACCESS_KEY_ID</code> and <code>S3_SECRET_ACCESS_KEY</code>, then
+              restart the storage and admin containers.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const environmentBlock = [
+    `S3_ENDPOINT=${credentials.endpoint}`,
+    `S3_REGION=${credentials.region}`,
+    `S3_ACCESS_KEY_ID=${credentials.accessKeyId}`,
+    `S3_SECRET_ACCESS_KEY=${credentials.secretAccessKey}`,
+  ].join("\n");
+
+  const fields = [
+    { id: "endpoint", label: "Endpoint", value: credentials.endpoint, secret: false },
+    { id: "region", label: "Region", value: credentials.region, secret: false },
+    { id: "access-key", label: "Access key", value: credentials.accessKeyId, secret: false },
+    {
+      id: "secret-key",
+      label: "Secret key",
+      value: credentials.secretAccessKey,
+      secret: true,
+    },
+  ] as const;
+
+  return (
+    <div className="rounded-lg border overflow-hidden">
+      <div className="flex flex-col gap-3 border-b bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">S3 SDK credentials</span>
+            <Badge variant="outline" className="border-amber-500/30 text-[10px] text-amber-700">
+              Shared service key
+            </Badge>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Use path-style addressing. This credential can access every v2 bucket and is not
+            exclusive to this project.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          onClick={() => copy(environmentBlock, "all")}
+        >
+          {copiedField === "all" ? (
+            <Check className="h-4 w-4 mr-1" />
+          ) : (
+            <Copy className="h-4 w-4 mr-1" />
+          )}
+          {copiedField === "all" ? "Copied" : "Copy all"}
+        </Button>
+      </div>
+
+      <div className="divide-y">
+        {fields.map((field) => (
+          <div
+            key={field.id}
+            className="grid gap-2 p-3 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:items-center sm:px-4"
+          >
+            <span className="text-xs font-medium text-muted-foreground">{field.label}</span>
+            <code className="min-w-0 overflow-x-auto whitespace-nowrap rounded bg-muted px-2 py-1.5 font-mono text-xs">
+              {field.secret && !secretVisible ? "••••••••••••••••••••••••••••••••" : field.value}
+            </code>
+            <div className="flex justify-end gap-1">
+              {field.secret && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setSecretVisible((visible) => !visible)}
+                  aria-label={secretVisible ? "Hide S3 secret key" : "Show S3 secret key"}
+                >
+                  {secretVisible ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => copy(field.value, field.id)}
+                aria-label={`Copy S3 ${field.label.toLowerCase()}`}
+              >
+                {copiedField === field.id ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

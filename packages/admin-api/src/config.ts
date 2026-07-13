@@ -29,4 +29,8 @@ export const config = {
   ssdDevice: optionalEnv("SSD_DEVICE", ""),
   hddDevices: optionalEnv("HDD_DEVICES", ""),
   microsdDevice: optionalEnv("MICROSD_DEVICE", ""),
+  s3Endpoint: optionalEnv("S3_ENDPOINT", "https://storage.denizlg24.com/v2"),
+  s3AccessKeyId: optionalEnv("S3_ACCESS_KEY_ID", ""),
+  s3SecretAccessKey: optionalEnv("S3_SECRET_ACCESS_KEY", ""),
+  s3Region: optionalEnv("S3_REGION", "eu-west-1"),
 };

@@ -16,6 +16,7 @@ import { mongoDbRoutes } from "./routes/db-mongodb";
 import { postgresDbRoutes } from "./routes/db-postgres";
 import { projectDatabaseRoutes, syncRedisProjectAclUsers } from "./routes/project-databases";
 import { projectRoutes } from "./routes/projects";
+import { s3CredentialsRoutes } from "./routes/s3-credentials";
 import { statsRoutes } from "./routes/stats";
 import { taskRoutes } from "./routes/tasks";
 import { userRoutes } from "./routes/users";
@@ -81,6 +82,18 @@ app.route("/api/stats", statsRoutes({ db }));
 app.use("/api/projects/*", auth(db, config.jwtSecret, COOKIE_NAME));
 app.use("/api/projects/*", requireRole("superuser"));
 app.route("/api/projects", projectRoutes({ db, meiliClient, syncWorker, pgClientFactory }));
+
+app.use("/api/settings/s3-credentials", auth(db, config.jwtSecret, COOKIE_NAME));
+app.use("/api/settings/s3-credentials", requireRole("superuser"));
+app.route(
+  "/api/settings/s3-credentials",
+  s3CredentialsRoutes({
+    endpoint: config.s3Endpoint,
+    accessKeyId: config.s3AccessKeyId,
+    secretAccessKey: config.s3SecretAccessKey,
+    region: config.s3Region,
+  }),
+);
 
 app.route(
   "/api/projects",

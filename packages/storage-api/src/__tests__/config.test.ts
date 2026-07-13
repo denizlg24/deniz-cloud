@@ -12,9 +12,15 @@ describe("storage-api config shape", () => {
       "hddStoragePath",
       "tempUploadPath",
       "ssdWatermark",
+      "s3Enabled",
+      "s3AccessKeyId",
+      "s3SecretAccessKey",
+      "s3Region",
+      "s3RootPath",
+      "s3TempPath",
     ];
 
-    expect(expectedFields).toHaveLength(8);
+    expect(expectedFields).toHaveLength(14);
   });
 
   it("port defaults to 3001", () => {
@@ -49,7 +55,16 @@ describe("storage-api config shape", () => {
   });
 
   it("PORT and TEMP_UPLOAD_PATH are optional (have defaults)", () => {
-    const optionalVars = ["PORT", "TEMP_UPLOAD_PATH", "SSD_WATERMARK_PERCENT"];
-    expect(optionalVars).toHaveLength(3);
+    const optionalVars = [
+      "PORT",
+      "TEMP_UPLOAD_PATH",
+      "SSD_WATERMARK_PERCENT",
+      "S3_ACCESS_KEY_ID",
+      "S3_SECRET_ACCESS_KEY",
+      "S3_REGION",
+      "S3_ROOT_PATH",
+      "S3_TEMP_PATH",
+    ];
+    expect(optionalVars).toHaveLength(8);
   });
 });
