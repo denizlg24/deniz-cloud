@@ -459,33 +459,34 @@ export async function initializeS3(config: S3RouteConfig): Promise<void> {
   if (config.enabled) await initS3Store(config);
 }
 
-export function s3Routes(config: S3RouteConfig): Hono {
-  const router = new Hono();
-
-  router.use("*", async (context, next) => {
-    const requestId = crypto.randomUUID().replaceAll("-", "");
-    try {
-      if (!config.enabled) {
-        throw new S3Error("ServiceUnavailable", "S3-compatible storage is not configured.", 503);
-      }
-      verifyS3Request(context.req.raw, config);
-      await next();
-      context.header("x-amz-request-id", requestId);
-      context.header("x-amz-bucket-region", config.region);
-    } catch (error) {
-      if (error instanceof S3Error) {
-        context.res = s3ErrorResponse(error, requestId);
-        return;
-      }
+async function handleS3Request(config: S3RouteConfig, request: Request): Promise<Response> {
+  const requestId = crypto.randomUUID().replaceAll("-", "");
+  let response: Response;
+  try {
+    if (!config.enabled) {
+      throw new S3Error("ServiceUnavailable", "S3-compatible storage is not configured.", 503);
+    }
+    verifyS3Request(request, config);
+    response = await dispatchS3(config, request);
+  } catch (error) {
+    if (error instanceof S3Error) {
+      response = s3ErrorResponse(error, requestId);
+    } else {
       console.error("S3 request failed", error);
-      context.res = s3ErrorResponse(
+      response = s3ErrorResponse(
         new S3Error("InternalError", "We encountered an internal error. Please try again.", 500),
         requestId,
       );
     }
-  });
+  }
+  response.headers.set("x-amz-request-id", requestId);
+  response.headers.set("x-amz-bucket-region", config.region);
+  return response;
+}
 
-  router.all("/", (context) => dispatchS3(config, context.req.raw));
-  router.all("/*", (context) => dispatchS3(config, context.req.raw));
+export function s3Routes(config: S3RouteConfig): Hono {
+  const router = new Hono();
+  router.all("/", (context) => handleS3Request(config, context.req.raw));
+  router.all("/*", (context) => handleS3Request(config, context.req.raw));
   return router;
 }

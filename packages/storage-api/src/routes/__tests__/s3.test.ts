@@ -10,6 +10,7 @@ import {
   DeleteBucketCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   HeadObjectCommand,
   ListBucketsCommand,
   ListObjectsV2Command,
@@ -60,7 +61,14 @@ describe("S3-compatible /v2 API", () => {
   });
 
   it("works end-to-end through the official AWS SDK", async () => {
+    await expect(client.send(new HeadBucketCommand({ Bucket: BUCKET }))).rejects.toMatchObject({
+      name: "NotFound",
+      $metadata: { httpStatusCode: 404 },
+    });
+
     await client.send(new CreateBucketCommand({ Bucket: BUCKET }));
+
+    await expect(client.send(new HeadBucketCommand({ Bucket: BUCKET }))).resolves.toBeDefined();
 
     const listedBuckets = await client.send(new ListBucketsCommand({}));
     expect(listedBuckets.Buckets?.map((bucket) => bucket.Name)).toContain(BUCKET);
