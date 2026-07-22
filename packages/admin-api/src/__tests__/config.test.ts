@@ -7,6 +7,7 @@ describe("admin-api config shape", () => {
     const expectedFields = [
       "port",
       "databaseUrl",
+      "dbPoolMax",
       "jwtSecret",
       "totpEncryptionKey",
       "meiliUrl",

@@ -6,6 +6,7 @@ describe("storage-api config shape", () => {
     const expectedFields = [
       "port",
       "databaseUrl",
+      "dbPoolMax",
       "jwtSecret",
       "totpEncryptionKey",
       "ssdStoragePath",
@@ -20,7 +21,7 @@ describe("storage-api config shape", () => {
       "s3TempPath",
     ];
 
-    expect(expectedFields).toHaveLength(14);
+    expect(expectedFields).toHaveLength(15);
   });
 
   it("port defaults to 3001", () => {

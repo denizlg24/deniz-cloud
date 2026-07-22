@@ -23,7 +23,7 @@ import { taskRoutes } from "./routes/tasks";
 import { userRoutes } from "./routes/users";
 import { startScheduler, stopScheduler } from "./scheduler";
 
-const db = createDb(config.databaseUrl);
+const db = createDb(config.databaseUrl, { max: config.dbPoolMax });
 const meiliClient = createMeiliClient(config.meiliUrl, config.meiliMasterKey);
 const mongoClient = createMongoClient(config.mongodbUri);
 const mongoAdminClient = new MongoClient(config.mongodbAdminUri, {
@@ -190,6 +190,7 @@ const shutdown = async () => {
   await syncWorker.stop();
   await mongoAdminClient.close();
   await closeMongoClient();
+  await db.$client.end();
   process.exit(0);
 };
 

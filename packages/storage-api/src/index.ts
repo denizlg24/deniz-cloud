@@ -16,7 +16,7 @@ import { uploadRoutes } from "./routes/uploads";
 import { PathValidationError } from "./utils/path";
 import { ensureSharedFolder, initStorageDirs } from "./utils/storage";
 
-const db = createDb(config.databaseUrl);
+const db = createDb(config.databaseUrl, { max: config.dbPoolMax });
 const meili = createMeiliClient(config.meiliUrl, config.meiliAdminKey);
 const s3Config = {
   enabled: config.s3Enabled,
@@ -31,7 +31,7 @@ await initStorageDirs(config);
 await ensureSharedFolder(db, config);
 await ensureStorageSearchIndex(meili);
 await initializeS3(s3Config);
-startCleanupScheduler(db);
+const cleanupScheduler = startCleanupScheduler(db);
 
 const app = new Hono();
 
@@ -111,6 +111,19 @@ app.all("/api/*", (c) =>
 
 app.use("*", serveStatic({ root: "./static" }));
 app.get("*", serveStatic({ root: "./static", rewriteRequestPath: () => "/index.html" }));
+
+let isShuttingDown = false;
+const shutdown = async () => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log("[storage-api] Shutting down...");
+  clearInterval(cleanupScheduler);
+  await db.$client.end();
+  process.exit(0);
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 export default {
   port: config.port,

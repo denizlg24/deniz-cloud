@@ -11,6 +11,7 @@ function boundedInteger(name: string, fallback: string, min: number, max: number
 export const config = {
   port: parseInt(optionalEnv("PORT", "3002"), 10),
   databaseUrl: requiredEnv("DATABASE_URL"),
+  dbPoolMax: boundedInteger("DB_POOL_MAX", "5", 1, 20),
   jwtSecret: requiredEnv("JWT_SECRET"),
   totpEncryptionKey: requiredEnv("TOTP_ENCRYPTION_KEY"),
   meiliUrl: requiredEnv("MEILI_URL"),

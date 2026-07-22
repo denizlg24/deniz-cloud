@@ -16,7 +16,8 @@ services:
       -c work_mem=4MB
       -c maintenance_work_mem=32MB
       -c effective_cache_size=256MB
-      -c max_connections=50
+      -c max_connections=${POSTGRES_MAX_CONNECTIONS:-50}
+      -c idle_in_transaction_session_timeout=${POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT:-60s}
     mem_limit: 200m
     restart: unless-stopped
     healthcheck:

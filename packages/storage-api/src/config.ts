@@ -3,9 +3,18 @@ import { optionalEnv, requiredEnv } from "@deniz-cloud/shared/env";
 
 const ssdStoragePath = requiredEnv("SSD_STORAGE_PATH");
 
+function boundedInteger(name: string, fallback: string, min: number, max: number): number {
+  const value = Number.parseInt(optionalEnv(name, fallback), 10);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}`);
+  }
+  return value;
+}
+
 export const config = {
   port: parseInt(optionalEnv("PORT", "3001"), 10),
   databaseUrl: requiredEnv("DATABASE_URL"),
+  dbPoolMax: boundedInteger("DB_POOL_MAX", "5", 1, 20),
   jwtSecret: requiredEnv("JWT_SECRET"),
   totpEncryptionKey: requiredEnv("TOTP_ENCRYPTION_KEY"),
   ssdStoragePath,
