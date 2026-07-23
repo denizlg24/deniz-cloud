@@ -1,0 +1,12 @@
+# SD card cleanup — runs weekly, Sundays at 04:00.
+# Install with:
+#   sudo install -m 644 -o root -g root \
+#     /home/denizlg24/deniz-cloud/scripts/infra/disk-cleanup.cron \
+#     /etc/cron.d/deniz-cloud-disk-cleanup
+#
+# /etc/cron.d entries take a user field (root) between the schedule and command.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+0 4 * * 0 root /home/denizlg24/deniz-cloud/scripts/infra/disk-cleanup.sh >> /var/log/disk-cleanup.log 2>&1

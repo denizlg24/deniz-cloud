@@ -247,6 +247,10 @@ services:
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
+      # Exposes the SD card's root filesystem to df for MICROSD_DEVICE stats.
+      # Docker's data-root lives on the NVMe, so without this no SD card
+      # filesystem is visible inside the container and it reports as offline.
+      - /:/host/rootfs:ro
       - ${SSD_MOUNT_PATH:-/mnt/ssd}:/mnt/ssd:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ${BACKUP_DIR:-./data/backups}:/backups
